@@ -1079,14 +1079,80 @@ if not NO_DATA:
 # ════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════
-tab1,tab2,tab3,tab4,tab5 = st.tabs([
+tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
     "📊 Analytics",
     "📋 Browse & Verdict",
     "📤 Upload & Score",
     "📄 Data Table",
     "🗂 Upload Catalog",
+    "🔍 Vendor Analysis",
 ])
+# ════════════════════════════════════════════════════════════
+# GITHUB FILE LOADER
+# ════════════════════════════════════════════════════════════
+GITHUB_RAW = (
+    "https://raw.githubusercontent.com/"
+    "avijeet528/vendor-draft-2/main/demo_quotes/{}")
 
+@st.cache_data(show_spinner=False)
+def load_price_from_github(filename):
+    """
+    Downloads a quote file directly from GitHub
+    and extracts price. Cached so only runs once.
+    """
+    url = GITHUB_RAW.format(filename)
+    try:
+        resp = requests.get(url, timeout=30)
+        if resp.status_code != 200:
+            return {
+                "price"    : "",
+                "price_num": 0.0,
+                "status"   : "Not found ({})"
+                             .format(resp.status_code),
+            }
+        ext = filename.rsplit(".",1)[-1].lower()
+        result = extract_price_from_bytes(
+            resp.content, ext)
+        result["status"] = (
+            "✅ Extracted"
+            if result["price_num"] > 0
+            else "⚠️ No price found")
+        return result
+    except Exception as e:
+        return {
+            "price"    : "",
+            "price_num": 0.0,
+            "status"   : "❌ Error: {}".format(str(e)),
+        }
+
+
+@st.cache_data(show_spinner=False)
+def load_all_prices_from_github(filenames_tuple):
+    """
+    Loads prices for all files from GitHub.
+    Takes a tuple (hashable) for caching.
+    """
+    results = {}
+    for fname in filenames_tuple:
+        results[fname] = load_price_from_github(fname)
+    return results
+
+
+def get_price_for_row(row, gh_prices):
+    """
+    Returns best available price for a catalog row.
+    Priority: GitHub extracted > Quoted Price in CSV
+    """
+    fname  = str(row.get("File Name","")).strip()
+    qp     = _parse_num(
+        str(row.get("Quoted Price","")).strip())
+    gh     = gh_prices.get(fname,{})
+    gh_p   = gh.get("price_num", 0.0)
+    if gh_p > 0:
+        return gh_p, "extracted"
+    if qp > 0:
+        return qp,  "catalog"
+    return 0.0, "none"
 # ════════════════════════════════════════════════════════════
 # TAB 1 — ANALYTICS
 # ════════════════════════════════════════════════════════════
@@ -2400,3 +2466,1139 @@ with tab5:
                     "✅ Catalog applied! "
                     "Dashboard updated.")
                 st.rerun()
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 6 — VENDOR ANALYSIS
+# ════════════════════════════════════════════════════════════
+with tab6:
+    if NO_DATA:
+        st.info(
+            "No catalog loaded. "
+            "Go to 🗂 Upload Catalog tab first.")
+    else:
+        # ── Header ──────────────────────────────────
+        st.markdown(
+            "<div style='background:#2D2D2D;"
+            "color:white;padding:20px 28px;"
+            "border-radius:4px;"
+            "border-left:6px solid #D04A02;"
+            "margin-bottom:20px'>"
+            "<div style='font-size:0.72em;"
+            "font-weight:700;letter-spacing:2px;"
+            "text-transform:uppercase;"
+            "color:#D04A02;margin-bottom:5px'>"
+            "Master Catalog Intelligence</div>"
+            "<h1 style='margin:0;font-size:1.3em;"
+            "font-weight:700;color:white'>"
+            "Vendor Price Analysis</h1>"
+            "<p style='margin:6px 0 0;opacity:0.6;"
+            "font-size:0.85em'>"
+            "Prices extracted directly from quote "
+            "files in GitHub repo · "
+            "Cheap vs expensive analysis per service"
+            "</p></div>",
+            unsafe_allow_html=True)
+
+        # ── Load all prices from GitHub ──────────────
+        all_fnames = tuple(
+            str(f).strip()
+            for f in df_master["File Name"].unique()
+            if str(f).strip() not in ["","nan"])
+
+        col_load, col_info = st.columns([2,3])
+        with col_load:
+            run_analysis = st.button(
+                "🔄 Load All Prices from GitHub",
+                type="primary",
+                use_container_width=True,
+                key="run_gh_analysis")
+
+        with col_info:
+            st.markdown(
+                "<div style='background:#FFF3F0;"
+                "border:1px solid #D04A02;"
+                "border-radius:4px;"
+                "padding:8px 14px;font-size:0.83em'>"
+                "📁 Reads <b>{}</b> quote files "
+                "directly from your GitHub repo. "
+                "Uses <b>Quoted Price</b> from catalog "
+                "as fallback if extraction fails."
+                "</div>".format(len(all_fnames)),
+                unsafe_allow_html=True)
+
+        # Cache key in session state
+        if run_analysis:
+            st.session_state[
+                "gh_prices_loaded"] = True
+            # Clear cache to re-fetch
+            load_all_prices_from_github.clear()
+            load_price_from_github.clear()
+
+        # Auto-load if already loaded before
+        if st.session_state.get(
+                "gh_prices_loaded", False):
+
+            with st.spinner(
+                    "Loading prices from GitHub…"):
+                gh_prices = load_all_prices_from_github(
+                    all_fnames)
+
+            # Build enriched dataframe
+            rows = []
+            for _, r in df_master.iterrows():
+                fname = str(
+                    r.get("File Name","")).strip()
+                price, source = get_price_for_row(
+                    r, gh_prices)
+                gh_info = gh_prices.get(fname, {})
+                rows.append({
+                    "Vendor"  : r["Vendor"],
+                    "Category": r["Category"],
+                    "File Name": fname,
+                    "Quoted Price": _parse_num(str(
+                        r.get("Quoted Price",""))),
+                    "Extracted Price": gh_info.get(
+                        "price_num", 0.0),
+                    "Best Price": price,
+                    "Source"  : source,
+                    "Status"  : gh_info.get(
+                        "status","—"),
+                    "Services": r.get("Comments",""),
+                })
+            df_analysis = pd.DataFrame(rows)
+            df_analysis = df_analysis[
+                df_analysis["Best Price"] > 0]
+
+            if df_analysis.empty:
+                st.warning(
+                    "No prices found. "
+                    "Check that files exist in "
+                    "demo_quotes/ on GitHub.")
+            else:
+                # ── KPI summary ─────────────────────
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "PRICE EXTRACTION SUMMARY")
+
+                k1,k2,k3,k4 = st.columns(4)
+                extracted = df_analysis[
+                    df_analysis["Source"]
+                    =="extracted"]
+                from_cat  = df_analysis[
+                    df_analysis["Source"]
+                    =="catalog"]
+
+                kpi(k1,
+                    len(df_analysis),
+                    "Files with Prices",
+                    "#D04A02")
+                kpi(k2,
+                    len(extracted),
+                    "Extracted from Files",
+                    "#295477")
+                kpi(k3,
+                    len(from_cat),
+                    "From Catalog",
+                    "#299D8F")
+                kpi(k4,
+                    _fmt(df_analysis[
+                        "Best Price"].mean()),
+                    "Avg Quote Value",
+                    "#2D2D2D")
+
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+
+                # ── Extraction status table ──────────
+                with st.expander(
+                        "📋 Extraction Status per File",
+                        expanded=False):
+                    status_rows = [
+                        "<table class='comp-table'>"
+                        "<thead><tr>"
+                        "<th>File Name</th>"
+                        "<th>Vendor</th>"
+                        "<th>Quoted Price</th>"
+                        "<th>Extracted Price</th>"
+                        "<th>Used Price</th>"
+                        "<th>Source</th>"
+                        "<th>Status</th>"
+                        "</tr></thead><tbody>"]
+                    for i,r in df_analysis.iterrows():
+                        bg = ("white" if i%2==0
+                              else "#F3F3F3")
+                        vc = vendor_color_map.get(
+                            r["Vendor"],"#8C8C8C")
+                        src_color = (
+                            "#22992E"
+                            if r["Source"]=="extracted"
+                            else "#FFB600")
+                        status_rows.append(
+                            "<tr style='background:{}'>"
+                            "<td style='font-family:"
+                            "monospace;font-size:0.78em'>"
+                            "{}</td>"
+                            "<td>{}</td>"
+                            "<td style='font-family:"
+                            "monospace'>{}</td>"
+                            "<td style='font-family:"
+                            "monospace;color:#295477'>"
+                            "{}</td>"
+                            "<td style='font-family:"
+                            "monospace;font-weight:700;"
+                            "color:#D04A02'>{}</td>"
+                            "<td style='color:{};"
+                            "font-weight:700;"
+                            "font-size:0.80em'>{}</td>"
+                            "<td style='font-size:"
+                            "0.80em'>{}</td>"
+                            "</tr>".format(
+                                bg,
+                                r["File Name"],
+                                vendor_pill(
+                                    r["Vendor"],vc),
+                                _fmt(r["Quoted Price"])
+                                if r["Quoted Price"]>0
+                                else "—",
+                                _fmt(r["Extracted Price"])
+                                if r["Extracted Price"]>0
+                                else "—",
+                                _fmt(r["Best Price"]),
+                                src_color,
+                                r["Source"].upper(),
+                                r["Status"]))
+                    status_rows.append(
+                        "</tbody></table>")
+                    st.markdown(
+                        "".join(status_rows),
+                        unsafe_allow_html=True)
+
+                # ════════════════════════════════════
+                # SECTION A — Per-Service Analysis
+                # ════════════════════════════════════
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "PER-SERVICE VENDOR ANALYSIS",
+                    "For each service: which vendor "
+                    "was cheapest and most expensive.")
+
+                # Explode services for analysis
+                df_svc_analysis = []
+                for _, r in df_analysis.iterrows():
+                    svcs_raw = str(
+                        r["Services"]).replace(
+                        "\\n","\n").replace(
+                        "\r\n","\n").replace(
+                        "\r","\n")
+                    svcs = [
+                        s.strip()
+                        for s in svcs_raw.split("\n")
+                        if s.strip() and
+                        s.strip() not in
+                        ["nan","None",""]]
+                    if not svcs:
+                        svcs = [svcs_raw.strip()]
+                    for svc in svcs:
+                        df_svc_analysis.append({
+                            "Service" : svc,
+                            "Vendor"  : r["Vendor"],
+                            "Category": r["Category"],
+                            "Price"   : r["Best Price"],
+                            "File"    : r["File Name"],
+                            "Source"  : r["Source"],
+                        })
+
+                df_svc_df = pd.DataFrame(
+                    df_svc_analysis)
+
+                # Filter to services with
+                # multiple vendor quotes
+                svc_vendor_counts = (
+                    df_svc_df.groupby("Service")[
+                        "Vendor"].nunique())
+                multi_vendor_svcs = svc_vendor_counts[
+                    svc_vendor_counts > 1].index.tolist()
+                single_vendor_svcs = svc_vendor_counts[
+                    svc_vendor_counts == 1].index.tolist()
+
+                # ── Multi-vendor services ────────────
+                if multi_vendor_svcs:
+                    st.markdown(
+                        "<div style='background:#F0FFF4;"
+                        "border-left:4px solid #22992E;"
+                        "padding:8px 14px;"
+                        "border-radius:2px;"
+                        "margin-bottom:12px;"
+                        "font-size:0.87em'>"
+                        "✅ <b>{} service(s)</b> quoted "
+                        "by multiple vendors — "
+                        "full price comparison available."
+                        "</div>".format(
+                            len(multi_vendor_svcs)),
+                        unsafe_allow_html=True)
+
+                    for svc in sorted(
+                            multi_vendor_svcs):
+                        d_svc = df_svc_df[
+                            df_svc_df["Service"]==svc
+                        ].sort_values("Price")
+
+                        min_p   = d_svc["Price"].min()
+                        max_p   = d_svc["Price"].max()
+                        avg_p   = d_svc["Price"].mean()
+                        spread  = round(
+                            (max_p-min_p)/min_p*100,1
+                        ) if min_p > 0 else 0
+                        best_v  = d_svc.loc[
+                            d_svc["Price"].idxmin(),
+                            "Vendor"]
+                        worst_v = d_svc.loc[
+                            d_svc["Price"].idxmax(),
+                            "Vendor"]
+
+                        with st.expander(
+                            "{}  ·  {} vendors  ·  "
+                            "spread {}%  ·  "
+                            "best: {} @ {}".format(
+                                svc,
+                                d_svc["Vendor"].nunique(),
+                                spread,
+                                best_v,
+                                _fmt(min_p)),
+                            expanded=False):
+
+                            # Score cards
+                            sc1,sc2,sc3 = st.columns(3)
+                            sc1.markdown(
+                                "<div class='score-card "
+                                "green'>"
+                                "<div style='font-size:"
+                                "0.68em;font-weight:700;"
+                                "text-transform:uppercase;"
+                                "color:#22992E'>"
+                                "Cheapest</div>"
+                                "<div style='font-size:"
+                                "1.6em;font-weight:800;"
+                                "color:#22992E'>{}</div>"
+                                "<div style='font-size:"
+                                "0.78em;color:#555'>"
+                                "{}</div>"
+                                "</div>".format(
+                                    _fmt(min_p),best_v),
+                                unsafe_allow_html=True)
+                            sc2.markdown(
+                                "<div class='score-card "
+                                "yellow'>"
+                                "<div style='font-size:"
+                                "0.68em;font-weight:700;"
+                                "text-transform:uppercase;"
+                                "color:#856404'>"
+                                "Average</div>"
+                                "<div style='font-size:"
+                                "1.6em;font-weight:800;"
+                                "color:#856404'>{}</div>"
+                                "<div style='font-size:"
+                                "0.78em;color:#555'>"
+                                "{} vendors</div>"
+                                "</div>".format(
+                                    _fmt(avg_p),
+                                    d_svc["Vendor"]
+                                    .nunique()),
+                                unsafe_allow_html=True)
+                            sc3.markdown(
+                                "<div class='score-card "
+                                "red'>"
+                                "<div style='font-size:"
+                                "0.68em;font-weight:700;"
+                                "text-transform:uppercase;"
+                                "color:#E0301E'>"
+                                "Most Expensive</div>"
+                                "<div style='font-size:"
+                                "1.6em;font-weight:800;"
+                                "color:#E0301E'>{}</div>"
+                                "<div style='font-size:"
+                                "0.78em;color:#555'>"
+                                "{}</div>"
+                                "</div>".format(
+                                    _fmt(max_p),
+                                    worst_v),
+                                unsafe_allow_html=True)
+
+                            st.markdown(
+                                "<br>",
+                                unsafe_allow_html=True)
+
+                            # Per-vendor table
+                            tbl = [
+                                "<table class='"
+                                "comp-table'>"
+                                "<thead><tr>"
+                                "<th>Vendor</th>"
+                                "<th>Price</th>"
+                                "<th>vs Average</th>"
+                                "<th>Price Score</th>"
+                                "<th>Verdict</th>"
+                                "<th>Source</th>"
+                                "</tr></thead><tbody>"]
+
+                            all_p = d_svc[
+                                "Price"].tolist()
+                            for j,(_,vr) in enumerate(
+                                    d_svc.iterrows()):
+                                bg  = ("white"
+                                       if j%2==0
+                                       else "#F3F3F3")
+                                vc  = vendor_color_map\
+                                    .get(vr["Vendor"],
+                                         "#8C8C8C")
+                                p   = vr["Price"]
+                                others = [
+                                    x for x in all_p
+                                    if x != p]
+                                ps  = None
+                                if p>0 and others:
+                                    ps,_,_,_,_ = \
+                                        price_score(
+                                            p,others)
+                                sc_col = score_color(ps)
+                                vt,_,vt_col = \
+                                    get_verdict(ps)
+                                pct = (round(
+                                    (p-avg_p)/avg_p*100,1)
+                                    if avg_p>0 else 0)
+                                pct_col = (
+                                    "#22992E"
+                                    if pct < 0
+                                    else "#E0301E"
+                                    if pct > 5
+                                    else "#856404")
+                                pct_txt = (
+                                    "{}% below avg"
+                                    .format(abs(pct))
+                                    if pct < 0
+                                    else "{}% above avg"
+                                    .format(abs(pct))
+                                    if pct > 0
+                                    else "At average")
+                                src_badge = (
+                                    "<span style='"
+                                    "background:#22992E;"
+                                    "color:white;"
+                                    "padding:2px 6px;"
+                                    "border-radius:2px;"
+                                    "font-size:0.72em;"
+                                    "font-weight:700'>"
+                                    "EXTRACTED</span>"
+                                    if vr["Source"]
+                                    =="extracted"
+                                    else
+                                    "<span style='"
+                                    "background:#FFB600;"
+                                    "color:white;"
+                                    "padding:2px 6px;"
+                                    "border-radius:2px;"
+                                    "font-size:0.72em;"
+                                    "font-weight:700'>"
+                                    "CATALOG</span>")
+                                tbl.append(
+                                    "<tr style='"
+                                    "background:{}'>"
+                                    "<td>{}</td>"
+                                    "<td style='"
+                                    "font-family:monospace;"
+                                    "font-weight:700'>"
+                                    "{}</td>"
+                                    "<td style='color:{}'>"
+                                    "{}</td>"
+                                    "<td style='"
+                                    "text-align:center'>"
+                                    "<span style='"
+                                    "font-weight:800;"
+                                    "font-size:1.1em;"
+                                    "color:{}'>"
+                                    "{}/100</span></td>"
+                                    "<td><span style='"
+                                    "color:{};"
+                                    "font-weight:700;"
+                                    "font-size:0.85em'>"
+                                    "{}</span></td>"
+                                    "<td>{}</td>"
+                                    "</tr>".format(
+                                        bg,
+                                        vendor_pill(
+                                            vr["Vendor"],
+                                            vc),
+                                        _fmt(p),
+                                        pct_col,pct_txt,
+                                        sc_col,
+                                        ps if ps
+                                        is not None
+                                        else "—",
+                                        vt_col,vt,
+                                        src_badge))
+
+                            tbl.append(
+                                "</tbody></table>")
+                            st.markdown(
+                                "".join(tbl),
+                                unsafe_allow_html=True)
+
+                            # Bar chart
+                            st.markdown(
+                                "<br>",
+                                unsafe_allow_html=True)
+                            fig_svc = go.Figure(
+                                go.Bar(
+                                    x=d_svc["Vendor"],
+                                    y=d_svc["Price"],
+                                    marker_color=[
+                                        vendor_color_map
+                                        .get(v,"#8C8C8C")
+                                        for v in
+                                        d_svc["Vendor"]],
+                                    marker_line_width=0,
+                                    text=d_svc["Price"]
+                                    .apply(_fmt),
+                                    textposition=
+                                    "outside"))
+                            fig_svc.add_hline(
+                                y=avg_p,
+                                line_dash="dash",
+                                line_color="#FFB600",
+                                line_width=2,
+                                annotation_text=
+                                "Avg: {}".format(
+                                    _fmt(avg_p)),
+                                annotation_position=
+                                "top right")
+                            fig_svc.update_layout(
+                                height=280,
+                                plot_bgcolor=CBG,
+                                paper_bgcolor=CBG,
+                                margin=dict(
+                                    l=5,r=10,t=20,b=10),
+                                font=CFONT,
+                                yaxis=dict(
+                                    title="Price (USD)",
+                                    showgrid=True,
+                                    gridcolor="#E0E0E0",
+                                    zeroline=False),
+                                xaxis=dict(
+                                    tickangle=-15),
+                                bargap=0.4)
+                            st.plotly_chart(
+                                fig_svc,
+                                use_container_width=True)
+
+                # ════════════════════════════════════
+                # SECTION B — Vendor Overview
+                # ════════════════════════════════════
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "VENDOR OVERVIEW — TOTAL SPEND",
+                    "Total quoted value per vendor "
+                    "across all services.")
+
+                vendor_totals = (
+                    df_analysis.groupby("Vendor")[
+                        "Best Price"]
+                    .agg(["sum","mean","count"])
+                    .reset_index())
+                vendor_totals.columns = [
+                    "Vendor","Total","Average","Quotes"]
+                vendor_totals = vendor_totals\
+                    .sort_values("Total",
+                                 ascending=False)
+
+                vt1,vt2 = st.columns(2)
+
+                with vt1:
+                    fig_tot = go.Figure(go.Bar(
+                        x=vendor_totals["Vendor"],
+                        y=vendor_totals["Total"],
+                        marker_color=[
+                            vendor_color_map.get(
+                                v,"#8C8C8C")
+                            for v in
+                            vendor_totals["Vendor"]],
+                        marker_line_width=0,
+                        text=vendor_totals[
+                            "Total"].apply(_fmt),
+                        textposition="outside"))
+                    fig_tot.update_layout(
+                        title="Total Quoted Value "
+                              "per Vendor",
+                        height=350,
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=10,t=40,b=10),
+                        font=CFONT,
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False),
+                        xaxis=dict(tickangle=-30),
+                        bargap=0.35)
+                    st.plotly_chart(
+                        fig_tot,
+                        use_container_width=True)
+
+                with vt2:
+                    fig_avg = go.Figure(go.Bar(
+                        x=vendor_totals["Vendor"],
+                        y=vendor_totals["Average"],
+                        marker_color=[
+                            vendor_color_map.get(
+                                v,"#8C8C8C")
+                            for v in
+                            vendor_totals["Vendor"]],
+                        marker_line_width=0,
+                        text=vendor_totals[
+                            "Average"].apply(_fmt),
+                        textposition="outside"))
+                    grand_avg = (
+                        df_analysis["Best Price"]
+                        .mean())
+                    fig_avg.add_hline(
+                        y=grand_avg,
+                        line_dash="dash",
+                        line_color="#FFB600",
+                        line_width=2,
+                        annotation_text=
+                        "Overall Avg: {}".format(
+                            _fmt(grand_avg)),
+                        annotation_position=
+                        "top right")
+                    fig_avg.update_layout(
+                        title="Average Quote Value "
+                              "per Vendor",
+                        height=350,
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=10,t=40,b=10),
+                        font=CFONT,
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False),
+                        xaxis=dict(tickangle=-30),
+                        bargap=0.35)
+                    st.plotly_chart(
+                        fig_avg,
+                        use_container_width=True)
+
+                # ── Vendor summary table ─────────────
+                section_title("VENDOR SUMMARY TABLE")
+                vtbl = [
+                    "<table class='comp-table'>"
+                    "<thead><tr>"
+                    "<th>Vendor</th>"
+                    "<th>Quotes</th>"
+                    "<th>Total Value</th>"
+                    "<th>Average Quote</th>"
+                    "<th>Min Quote</th>"
+                    "<th>Max Quote</th>"
+                    "<th>Overall Verdict</th>"
+                    "</tr></thead><tbody>"]
+
+                overall_avg = (
+                    df_analysis["Best Price"].mean())
+
+                for i,vr in vendor_totals.iterrows():
+                    bg  = ("white" if i%2==0
+                           else "#F3F3F3")
+                    vc  = vendor_color_map.get(
+                        vr["Vendor"],"#8C8C8C")
+                    v_df = df_analysis[
+                        df_analysis["Vendor"]
+                        ==vr["Vendor"]]
+                    v_min = v_df["Best Price"].min()
+                    v_max = v_df["Best Price"].max()
+                    v_avg = vr["Average"]
+                    pct   = round(
+                        (v_avg-overall_avg)
+                        /overall_avg*100,1
+                    ) if overall_avg > 0 else 0
+                    pct_col = (
+                        "#22992E" if pct < -5
+                        else "#E0301E" if pct > 5
+                        else "#856404")
+                    pct_txt = (
+                        "{}% below avg".format(
+                            abs(pct))
+                        if pct < 0
+                        else "{}% above avg".format(
+                            abs(pct))
+                        if pct > 0
+                        else "At average")
+                    # Overall verdict for vendor
+                    if pct < -10:
+                        ov = ("✅ COMPETITIVE",
+                              "#22992E")
+                    elif pct > 10:
+                        ov = ("🔴 EXPENSIVE",
+                              "#E0301E")
+                    else:
+                        ov = ("🟡 AVERAGE",
+                              "#856404")
+                    vtbl.append(
+                        "<tr style='background:{}'>"
+                        "<td>{}</td>"
+                        "<td style='text-align:center;"
+                        "font-weight:700'>{}</td>"
+                        "<td style='font-family:"
+                        "monospace;font-weight:700;"
+                        "color:#D04A02'>{}</td>"
+                        "<td style='font-family:"
+                        "monospace'>{}</td>"
+                        "<td style='font-family:"
+                        "monospace;color:#22992E'>"
+                        "{}</td>"
+                        "<td style='font-family:"
+                        "monospace;color:#E0301E'>"
+                        "{}</td>"
+                        "<td style='color:{};"
+                        "font-weight:700;"
+                        "font-size:0.85em'>{}</td>"
+                        "</tr>".format(
+                            bg,
+                            vendor_pill(
+                                vr["Vendor"],vc),
+                            int(vr["Quotes"]),
+                            _fmt(vr["Total"]),
+                            _fmt(v_avg),
+                            _fmt(v_min),
+                            _fmt(v_max),
+                            ov[1],ov[0]))
+
+                vtbl.append("</tbody></table>")
+                st.markdown(
+                    "".join(vtbl),
+                    unsafe_allow_html=True)
+
+                # ════════════════════════════════════
+                # SECTION C — Category Analysis
+                # ════════════════════════════════════
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "CATEGORY PRICE ANALYSIS",
+                    "Average spend and vendor "
+                    "distribution per category.")
+
+                cat_totals = (
+                    df_analysis.groupby("Category")[
+                        "Best Price"]
+                    .agg(["mean","sum","count"])
+                    .reset_index())
+                cat_totals.columns = [
+                    "Category","Average",
+                    "Total","Quotes"]
+                cat_totals = cat_totals.sort_values(
+                    "Total",ascending=False)
+
+                ct1,ct2 = st.columns(2)
+                with ct1:
+                    fig_cat_tot = px.bar(
+                        cat_totals,
+                        x="Category",
+                        y="Total",
+                        color="Category",
+                        color_discrete_sequence=COLORS,
+                        text="Total",
+                        title="Total Spend "
+                              "per Category")
+                    fig_cat_tot.update_traces(
+                        texttemplate="%{text:$,.0f}",
+                        textposition="outside")
+                    fig_cat_tot.update_layout(
+                        height=350,
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=10,t=40,b=10),
+                        font=CFONT,
+                        showlegend=False,
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False),
+                        xaxis=dict(tickangle=-30))
+                    st.plotly_chart(
+                        fig_cat_tot,
+                        use_container_width=True)
+
+                with ct2:
+                    # Vendor distribution per category
+                    cat_vendor = (
+                        df_analysis.groupby(
+                            ["Category","Vendor"])
+                        ["Best Price"].mean()
+                        .reset_index())
+                    cat_vendor.columns = [
+                        "Category","Vendor","Price"]
+                    fig_cat_v = px.bar(
+                        cat_vendor,
+                        x="Category",
+                        y="Price",
+                        color="Vendor",
+                        barmode="group",
+                        color_discrete_sequence=COLORS,
+                        title="Vendor Prices "
+                              "by Category",
+                        text="Price")
+                    fig_cat_v.update_traces(
+                        texttemplate="%{text:$,.0f}",
+                        textposition="outside")
+                    fig_cat_v.update_layout(
+                        height=350,
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=10,t=40,b=10),
+                        font=CFONT,
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False),
+                        xaxis=dict(tickangle=-30),
+                        legend=dict(
+                            orientation="h",
+                            x=0,y=-0.3,
+                            font=dict(size=9)))
+                    st.plotly_chart(
+                        fig_cat_v,
+                        use_container_width=True)
+
+                # ════════════════════════════════════
+                # SECTION D — Single vendor services
+                # ════════════════════════════════════
+                if single_vendor_svcs:
+                    st.markdown(
+                        "<br>",
+                        unsafe_allow_html=True)
+                    section_title(
+                        "SINGLE-VENDOR SERVICES",
+                        "These services only have "
+                        "one vendor — no competition.")
+                    st.markdown(
+                        "<div style='background:"
+                        "#FFF8E1;"
+                        "border-left:4px solid "
+                        "#FFB600;"
+                        "padding:8px 14px;"
+                        "border-radius:2px;"
+                        "margin-bottom:12px;"
+                        "font-size:0.87em'>"
+                        "⚠️ <b>{} service(s)</b> have "
+                        "only one vendor — "
+                        "consider sourcing additional "
+                        "quotes for better negotiation."
+                        "</div>".format(
+                            len(single_vendor_svcs)),
+                        unsafe_allow_html=True)
+
+                    sv_rows = [
+                        "<table class='comp-table'>"
+                        "<thead><tr>"
+                        "<th>Service</th>"
+                        "<th>Vendor</th>"
+                        "<th>Category</th>"
+                        "<th>Price</th>"
+                        "<th>Recommendation</th>"
+                        "</tr></thead><tbody>"]
+
+                    for j,svc in enumerate(
+                            sorted(single_vendor_svcs)):
+                        d_sv  = df_svc_df[
+                            df_svc_df["Service"]==svc]
+                        if d_sv.empty: continue
+                        row_s = d_sv.iloc[0]
+                        bg    = ("white" if j%2==0
+                                 else "#F3F3F3")
+                        vc    = vendor_color_map.get(
+                            row_s["Vendor"],"#8C8C8C")
+                        sv_rows.append(
+                            "<tr style='background:{}'>"
+                            "<td style='font-weight:"
+                            "600'>{}</td>"
+                            "<td>{}</td>"
+                            "<td style='color:#555'>"
+                            "{}</td>"
+                            "<td style='font-family:"
+                            "monospace;font-weight:700;"
+                            "color:#295477'>{}</td>"
+                            "<td style='color:#856404;"
+                            "font-size:0.82em'>"
+                            "⚠️ Seek additional "
+                            "quotes</td>"
+                            "</tr>".format(
+                                bg,
+                                svc,
+                                vendor_pill(
+                                    row_s["Vendor"],
+                                    vc),
+                                row_s["Category"],
+                                _fmt(row_s["Price"])))
+
+                    sv_rows.append(
+                        "</tbody></table>")
+                    st.markdown(
+                        "".join(sv_rows),
+                        unsafe_allow_html=True)
+
+                # ════════════════════════════════════
+                # SECTION E — AI Recommendations
+                # ════════════════════════════════════
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "AI PROCUREMENT RECOMMENDATIONS")
+
+                recs = []
+
+                # Cheapest vendor overall
+                if not vendor_totals.empty:
+                    cheapest_v = vendor_totals.iloc[
+                        vendor_totals["Average"]
+                        .values.argmin()]["Vendor"]
+                    cheapest_avg = vendor_totals[
+                        vendor_totals["Vendor"]
+                        ==cheapest_v][
+                        "Average"].values[0]
+                    recs.append({
+                        "icon" : "✅",
+                        "color": "#22992E",
+                        "text" : (
+                            "<b>{}</b> offers the "
+                            "lowest average quote at "
+                            "<b>{}</b> — preferred "
+                            "vendor for cost "
+                            "optimisation.".format(
+                                cheapest_v,
+                                _fmt(cheapest_avg)))
+                    })
+
+                # Most expensive vendor
+                if not vendor_totals.empty:
+                    exp_v = vendor_totals.iloc[
+                        vendor_totals["Average"]
+                        .values.argmax()]["Vendor"]
+                    exp_avg = vendor_totals[
+                        vendor_totals["Vendor"]
+                        ==exp_v][
+                        "Average"].values[0]
+                    pct_diff = round(
+                        (exp_avg-cheapest_avg)
+                        /cheapest_avg*100,1
+                    ) if cheapest_avg > 0 else 0
+                    if pct_diff > 10:
+                        recs.append({
+                            "icon" : "🔴",
+                            "color": "#E0301E",
+                            "text" : (
+                                "<b>{}</b> is the most "
+                                "expensive vendor — "
+                                "<b>{}% higher</b> "
+                                "than the cheapest. "
+                                "Negotiate or "
+                                "shortlist alternatives."
+                                .format(
+                                    exp_v,pct_diff))
+                        })
+
+                # High competition services
+                if len(multi_vendor_svcs) > 0:
+                    recs.append({
+                        "icon" : "💡",
+                        "color": "#295477",
+                        "text" : (
+                            "<b>{} service(s)</b> have "
+                            "multiple vendors quoting — "
+                            "use competitive pressure "
+                            "to negotiate better "
+                            "pricing.".format(
+                                len(multi_vendor_svcs)))
+                    })
+
+                # Single vendor risk
+                if len(single_vendor_svcs) > 0:
+                    recs.append({
+                        "icon" : "⚠️",
+                        "color": "#FFB600",
+                        "text" : (
+                            "<b>{} service(s)</b> have "
+                            "only one vendor — "
+                            "procurement risk. "
+                            "Seek additional quotes "
+                            "before awarding.".format(
+                                len(single_vendor_svcs)))
+                    })
+
+                # Price spread
+                if multi_vendor_svcs:
+                    spreads = []
+                    for svc in multi_vendor_svcs:
+                        d_s = df_svc_df[
+                            df_svc_df["Service"]==svc]
+                        mn  = d_s["Price"].min()
+                        mx  = d_s["Price"].max()
+                        if mn > 0:
+                            spreads.append(
+                                (mx-mn)/mn*100)
+                    if spreads:
+                        avg_spread = round(
+                            sum(spreads)/len(spreads),1)
+                        if avg_spread > 15:
+                            recs.append({
+                                "icon" : "📊",
+                                "color": "#D04A02",
+                                "text" : (
+                                    "Average price "
+                                    "spread across "
+                                    "competitive "
+                                    "services is "
+                                    "<b>{}%</b> — "
+                                    "significant "
+                                    "savings available "
+                                    "through vendor "
+                                    "selection.".format(
+                                        avg_spread))
+                            })
+
+                for rec in recs:
+                    st.markdown(
+                        "<div style='background:"
+                        "white;"
+                        "border-left:4px solid {};"
+                        "padding:10px 16px;"
+                        "border-radius:2px;"
+                        "margin-bottom:8px;"
+                        "font-size:0.87em'>"
+                        "{} {}</div>".format(
+                            rec["color"],
+                            rec["icon"],
+                            rec["text"]),
+                        unsafe_allow_html=True)
+
+                # ════════════════════════════════════
+                # SECTION F — Full data download
+                # ════════════════════════════════════
+                st.markdown(
+                    "<br>",
+                    unsafe_allow_html=True)
+                section_title(
+                    "FULL ANALYSIS DATA")
+
+                # Show full table
+                display_cols = [
+                    "Vendor","Category",
+                    "File Name","Best Price","Source"]
+                st.dataframe(
+                    df_analysis[display_cols]
+                    .sort_values(
+                        ["Category","Best Price"]),
+                    use_container_width=True,
+                    height=320)
+
+                # Download button
+                csv_out = df_analysis[
+                    display_cols].to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Full Analysis CSV",
+                    data=csv_out,
+                    file_name="vendor_analysis.csv",
+                    mime="text/csv",
+                    type="primary")
+
+        else:
+            # Not yet loaded — show instructions
+            st.markdown(
+                "<br>",
+                unsafe_allow_html=True)
+            st.markdown(
+                "<div style='background:white;"
+                "border:1px solid #e0e0e0;"
+                "border-radius:4px;"
+                "padding:24px 28px;"
+                "text-align:center;"
+                "margin-top:20px'>"
+                "<div style='font-size:2em;"
+                "margin-bottom:12px'>🔍</div>"
+                "<div style='font-size:1.1em;"
+                "font-weight:700;color:#2D2D2D;"
+                "margin-bottom:8px'>"
+                "Click the button above to start "
+                "analysis</div>"
+                "<div style='font-size:0.85em;"
+                "color:#7D7D7D;max-width:500px;"
+                "margin:0 auto'>"
+                "The dashboard will fetch all "
+                "<b>{}</b> quote files directly from "
+                "your GitHub repo and extract prices "
+                "automatically. "
+                "Catalog prices are used as fallback."
+                "</div></div>".format(len(all_fnames)),
+                unsafe_allow_html=True)
+
+            # Show what will be loaded
+            st.markdown(
+                "<br>",
+                unsafe_allow_html=True)
+            with st.expander(
+                    "📁 Files that will be loaded "
+                    "({})".format(len(all_fnames)),
+                    expanded=False):
+                preview_rows = [
+                    "<table class='comp-table'>"
+                    "<thead><tr>"
+                    "<th>File Name</th>"
+                    "<th>Vendor</th>"
+                    "<th>Category</th>"
+                    "<th>Catalog Price</th>"
+                    "</tr></thead><tbody>"]
+                for i,(_,r) in enumerate(
+                        df_master.iterrows()):
+                    bg  = ("white" if i%2==0
+                           else "#F3F3F3")
+                    vc  = vendor_color_map.get(
+                        r["Vendor"],"#8C8C8C")
+                    qp  = _parse_num(str(
+                        r.get("Quoted Price",
+                              "")).strip())
+                    preview_rows.append(
+                        "<tr style='background:{}'>"
+                        "<td style='font-family:"
+                        "monospace;font-size:0.78em'>"
+                        "{}</td>"
+                        "<td>{}</td>"
+                        "<td style='color:#555'>"
+                        "{}</td>"
+                        "<td style='font-family:"
+                        "monospace;color:#295477'>"
+                        "{}</td>"
+                        "</tr>".format(
+                            bg,
+                            r["File Name"],
+                            vendor_pill(
+                                r["Vendor"],vc),
+                            r["Category"],
+                            _fmt(qp)
+                            if qp>0 else "—"))
+                preview_rows.append(
+                    "</tbody></table>")
+                st.markdown(
+                    "".join(preview_rows),
+                    unsafe_allow_html=True)
