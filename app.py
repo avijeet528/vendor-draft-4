@@ -777,6 +777,25 @@ def get_file_link_from_row(row):
             return val
     return ""
 
+def parse_services_from_cell(val):
+    """Parse newline/semicolon separated services."""
+    if not val or str(val).strip() in [
+            "","nan","None"]:
+        return []
+    s = str(val)
+    s = s.replace("\\n","\n")\
+         .replace("\r\n","\n")\
+         .replace("\r","\n")
+    parts = [
+        p.strip() for p in s.split("\n")
+        if p.strip() and
+        p.strip() not in ["nan","None"]]
+    if not parts:
+        parts = [
+            p.strip() for p in s.split(";")
+            if p.strip()]
+    return parts
+
 
 def analyze_real_catalog(df_catalog):
     """
