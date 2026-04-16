@@ -239,6 +239,86 @@ def _text_from_bytes(content, ext):
 def extract_price_from_bytes(content, ext):
     text  = _text_from_bytes(content, ext)
     price = _best_price(text)
+
+    # ── FALLBACK: scan all numbers if keyword search failed ──
+    if not price or _parse_num(price) <= 0:
+        # Find the LARGEST number in the document
+        all_nums = PRICE_RE.findall(text)
+        valid    = [
+            h.strip() for h in all_nums
+            if _parse_num(h) >= 1000]
+        if valid:
+            price = max(valid, key=_parse_num)
+
+    # ── FALLBACK 2: read Excel cells directly ──
+    if (not price or _parse_num(price) <= 0) \
+            and ext.lower() in ("xlsx","xls"):
+        try:
+            wb = openpyxl.load_workbook(
+                io.BytesIO(content),
+                data_only=True, read_only=True)
+            all_vals = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(
+                        values_only=True):
+                    for cell in row:
+                        if cell is None:
+                            continue
+                        # Check cell label for total keywords
+                        cell_str = str(cell).lower()
+                        if any(k in cell_str for k in
+                               ["total","grand","amount",
+                                "subtotal"]):
+                            continue
+                        # Collect numeric values
+                        try:
+                            n = float(str(cell).replace(
+                                ",","").strip())
+                            if n >= 1000:
+                                all_vals.append(n)
+                        except Exception:
+                            pass
+            wb.close()
+            if all_vals:
+                price = str(max(all_vals))
+        except Exception:
+            pass
+
+    # ── FALLBACK 3: look for GRAND TOTAL row in Excel ──
+    if (not price or _parse_num(price) <= 0) \
+            and ext.lower() in ("xlsx","xls"):
+        try:
+            wb = openpyxl.load_workbook(
+                io.BytesIO(content),
+                data_only=True, read_only=True)
+            for ws in wb.worksheets:
+                prev_was_total = False
+                for row in ws.iter_rows(
+                        values_only=True):
+                    row_text = " ".join(
+                        str(c).lower()
+                        for c in row if c is not None)
+                    if any(k in row_text for k in
+                           ["grand total","grand",
+                            "total amount","total"]):
+                        # Find numeric in this row
+                        for cell in row:
+                            try:
+                                n = float(
+                                    str(cell)
+                                    .replace(",","")
+                                    .strip())
+                                if n >= 1000:
+                                    price = str(n)
+                                    break
+                            except Exception:
+                                pass
+                    if price and _parse_num(price) > 0:
+                        break
+            wb.close()
+        except Exception:
+            pass
+
     return {
         "price"    : price,
         "price_num": _parse_num(price) if price else 0.0,
@@ -1138,6 +1218,20 @@ with tab1:
 # TAB 2 — BROWSE & VERDICT
 # ════════════════════════════════════════════════════════════
 with tab2:
+    if not NO_DATA:
+        with st.expander(
+                "🔧 Debug — click to verify data",
+                expanded=False):
+            st.write("**Vendors:**",
+                df_master["Vendor"].unique().tolist())
+            st.write("**Services sample:**",
+                df_exploded["Service"].head(15).tolist())
+            st.write("**Has Quoted Price column:**",
+                "Quoted Price" in df_master.columns)
+            if "Quoted Price" in df_master.columns:
+                st.write("**Sample prices:**",
+                    df_master["Quoted Price"].head(10).tolist())
+    # ── END DEBUG ──
     if NO_DATA:
         st.info(
             "No catalog loaded. "
@@ -1186,24 +1280,39 @@ with tab2:
             has_price = "Quoted Price" in d_sel.columns
 
             # Collect vendor prices
+            # KEY FIX: always use Quoted Price from catalog first
             vendor_prices_map = {}
             for _, r in d_sel.drop_duplicates(
-                    subset=["Vendor",
-                            "File Name"]).iterrows():
-                qp = _parse_num(str(
-                    r.get("Quoted Price","")).strip())
+                    subset=["Vendor","File Name"]).iterrows():
+            
+                v  = r["Vendor"]
+                qp = _parse_num(
+                    str(r.get("Quoted Price","")).strip())
                 ck = "px_{}".format(
                     str(r.get("File Name","")).strip())
                 ca = st.session_state.get(ck)
                 ep = ca["price_num"] if ca else 0.0
+            
+                # Priority: extracted price > quoted price
                 ref = ep if ep > 0 else qp
-                v = r["Vendor"]
+            
                 if ref > 0:
                     if v not in vendor_prices_map:
                         vendor_prices_map[v] = ref
                     else:
+                        # Keep lowest price per vendor
                         vendor_prices_map[v] = min(
                             vendor_prices_map[v], ref)
+            
+            # ── If still no prices, use Quoted Price directly ──
+            if not vendor_prices_map:
+                for _, r in d_sel.drop_duplicates(
+                        subset=["Vendor"]).iterrows():
+                    v  = r["Vendor"]
+                    qp = _parse_num(
+                        str(r.get("Quoted Price","")).strip())
+                    if qp > 0 and v not in vendor_prices_map:
+                        vendor_prices_map[v] = qp
 
             verdict = generate_selection_verdict(
                 selected_svcs, d_sel,
@@ -1786,9 +1895,14 @@ with tab3:
                     "Price not found automatically.")
                 manual = st.number_input(
                     "Enter price manually (USD)",
-                    min_value=0.0,step=100.0,
-                    value=0.0)
-                if manual > 0: new_price = manual
+                    min_value=0.0, step=100.0,
+                    value=0.0,
+                    key="manual_price_input")
+                if manual > 0:
+                    new_price = manual
+                    st.success(
+                        "Using manual price: **{}**".format(
+                            _fmt(manual)))
 
             section_title(
                 "STEP 3 — SELECT SERVICES")
@@ -1825,6 +1939,11 @@ with tab3:
             section_title(
                 "STEP 4 — COMPARISON & VERDICT")
 
+            # Auto-set price from manual input
+            manual_val = st.session_state.get(
+                "manual_price_input", 0.0)
+            if new_price <= 0 and manual_val > 0:
+                new_price = float(manual_val)
             if not new_services and new_price <= 0:
                 st.info(
                     "Select services to compare.")
