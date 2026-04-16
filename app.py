@@ -759,22 +759,108 @@ def fetch_file_and_extract(url, filename):
             "status"   : "❌ {}".format(
                 str(e)[:60]),
         }
+@st.cache_data
+def extract_hyperlinks(file_path):
+    """
+    Extracts hyperlinks embedded in File Name column
+    AND any other column that has hyperlinks.
+    Returns dict: {filename: url}
+    """
+    link_map = {}
+    try:
+        wb = openpyxl.load_workbook(file_path)
+        ws = wb.active
 
+        # Find header row and all column positions
+        header_row = None
+        col_indices = {}
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value and str(
+                        cell.value).strip().lower() in [
+                    "file name","filename",
+                    "file link","file url",
+                    "url","hyperlink","link"]:
+                    col_indices[
+                        str(cell.value).strip()
+                        .lower()] = cell.column
+                    header_row = cell.row
+            if header_row:
+                break
+
+        if not header_row:
+            wb.close()
+            return link_map
+
+        # Scan all data rows
+        for row in ws.iter_rows(
+                min_row=header_row+1):
+            fname = None
+            url   = None
+
+            for cell in row:
+                # Get filename value
+                if (cell.column == col_indices.get(
+                        "file name") or
+                        cell.column == col_indices.get(
+                            "filename")):
+                    if cell.value:
+                        fname = str(
+                            cell.value).strip()
+                    # Check hyperlink on this cell
+                    if cell.hyperlink:
+                        url = str(
+                            cell.hyperlink.target
+                        ).strip()
+
+                # Also check dedicated link columns
+                for link_col in [
+                        "file link","file url",
+                        "url","hyperlink","link"]:
+                    if cell.column == col_indices.get(
+                            link_col):
+                        if cell.value and str(
+                                cell.value).strip(
+                        ).startswith("http"):
+                            url = str(
+                                cell.value).strip()
+                        if cell.hyperlink and not url:
+                            url = str(
+                                cell.hyperlink.target
+                            ).strip()
+
+            if fname and url:
+                link_map[fname] = url
+
+        wb.close()
+    except Exception as e:
+        st.warning(
+            "Hyperlink extraction: {}".format(e))
+    return link_map
 
 def get_file_link_from_row(row):
     """
-    Extracts file URL from a catalog row.
-    Checks multiple possible column names.
+    Gets the URL for a catalog row.
+    Checks Hyperlink column first (extracted from
+    File Name cell hyperlink), then other URL columns.
     """
+    # First check Hyperlink column
+    # (populated from File Name cell hyperlink)
     for col in [
-        "File Link","File URL","URL",
-        "Hyperlink","Link","file_link",
-        "file link","hyperlink"
+        "Hyperlink","File Link","File URL",
+        "URL","hyperlink","link","file_link"
     ]:
         val = str(row.get(col,"")).strip()
         if val and val not in [
-                "","nan","None","#N/A"]:
+                "","nan","None","#N/A"] and \
+                val.startswith("http"):
             return val
+
+    # Also check if File Name itself is a URL
+    fname = str(row.get("File Name","")).strip()
+    if fname.startswith("http"):
+        return fname
+
     return ""
 
 def parse_services_from_cell(val):
@@ -970,7 +1056,46 @@ def process_uploaded_catalog(file_bytes, filename):
             df[col] = (df[col].fillna("")
                        .astype(str).str.strip())
         df.reset_index(drop=True, inplace=True)
-        df["Hyperlink"] = ""
+        # Extract hyperlinks from File Name column
+        hmap = {}
+        if ext in ("xlsx","xls"):
+            try:
+                wb_h = openpyxl.load_workbook(
+                    io.BytesIO(file_bytes))
+                ws_h = wb_h.active
+
+                # Find File Name column
+                fn_col  = None
+                hdr_row = None
+                for row in ws_h.iter_rows():
+                    for cell in row:
+                        if cell.value and str(
+                                cell.value).strip(
+                        ).lower() == "file name":
+                            fn_col  = cell.column
+                            hdr_row = cell.row
+                            break
+                    if fn_col:
+                        break
+
+                if fn_col and hdr_row:
+                    for row in ws_h.iter_rows(
+                            min_row=hdr_row+1):
+                        for cell in row:
+                            if cell.column == fn_col:
+                                if (cell.value and
+                                        cell.hyperlink):
+                                    hmap[str(
+                                        cell.value
+                                    ).strip()] = str(
+                                        cell.hyperlink
+                                        .target).strip()
+                wb_h.close()
+            except Exception:
+                pass
+
+        df["Hyperlink"] = df["File Name"].map(
+            hmap).fillna("")
 
         def parse_svc(v):
             if not v or str(v).strip() in [
