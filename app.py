@@ -535,14 +535,15 @@ def generate_selection_verdict(
 # DATA LOADING — reads CSV (GitHub-friendly)
 # ════════════════════════════════════════════════════════════
 @st.cache_data
+@st.cache_data
 def load_data():
-    # ── Try CSV first (most reliable) ──
     CSV_PATH = "master_catalog.csv"
     XLS_PATH = "Master Catalog.xlsx"
 
     df = None
 
-   if os.path.exists(XLS_PATH):
+    # ── Try Excel first (full real data) ──
+    if os.path.exists(XLS_PATH):
         try:
             raw = pd.read_excel(
                 XLS_PATH, engine="openpyxl",
@@ -555,7 +556,8 @@ def load_data():
                 if (any("category" in v for v in vals)
                         and any("vendor" in v
                                 for v in vals)):
-                    header_row = i; break
+                    header_row = i
+                    break
             df = pd.read_excel(
                 XLS_PATH, engine="openpyxl",
                 header=header_row)
@@ -563,37 +565,17 @@ def load_data():
                 str(c).strip() for c in df.columns]
         except Exception as e:
             st.warning("Excel load error: {}".format(e))
+            df = None
 
-    elif os.path.exists(CSV_PATH):
+    # ── Fallback to CSV if Excel not found ──
+    if df is None and os.path.exists(CSV_PATH):
         try:
             df = pd.read_csv(CSV_PATH)
             df.columns = [
                 str(c).strip() for c in df.columns]
         except Exception as e:
             st.warning("CSV load error: {}".format(e))
-
-
-    elif os.path.exists(XLS_PATH):
-        try:
-            raw = pd.read_excel(
-                XLS_PATH, engine="openpyxl",
-                header=None)
-            header_row = 0
-            for i, row in raw.iterrows():
-                vals = [
-                    str(v).strip().lower()
-                    for v in row.values if pd.notna(v)]
-                if (any("category" in v for v in vals)
-                        and any("vendor" in v
-                                for v in vals)):
-                    header_row = i; break
-            df = pd.read_excel(
-                XLS_PATH, engine="openpyxl",
-                header=header_row)
-            df.columns = [
-                str(c).strip() for c in df.columns]
-        except Exception as e:
-            st.warning("Excel load error: {}".format(e))
+            df = None
 
     if df is None:
         return None, None
@@ -605,96 +587,102 @@ def load_data():
         if cl == "category":
             col_map["Category"] = c
         elif any(k in cl for k in
-                 ["vendor","supplier"]):
+                 ["vendor", "supplier"]):
             col_map["Vendor"] = c
         elif "file name" in cl or cl == "filename":
             col_map["File Name"] = c
         elif any(k in cl for k in
-                 ["file link","file url","url","link"]):
+                 ["file link", "file url",
+                  "url", "link"]):
             col_map["File Link"] = c
         elif any(k in cl for k in
-                 ["comment","service","description",
-                  "scope"]):
+                 ["comment", "service",
+                  "description", "scope"]):
             col_map["Comments"] = c
         elif any(k in cl for k in
-                 ["price","cost","amount","quoted"]):
+                 ["price", "cost",
+                  "amount", "quoted"]):
             col_map["Quoted Price"] = c
 
     df.rename(
-        columns={v:k for k,v in col_map.items()},
+        columns={v: k for k, v in col_map.items()},
         inplace=True)
 
-    # Ensure all required columns exist
-    for req in ["Category","Vendor","File Name",
-                "Comments"]:
+    # ── Ensure required columns exist ──
+    for req in ["Category", "Vendor",
+                "File Name", "Comments"]:
         if req not in df.columns:
             df[req] = ""
 
-    keep = ["Category","Vendor","File Name","Comments"]
-    for e in ["File Link","Quoted Price"]:
-        if e in df.columns: keep.append(e)
+    keep = ["Category", "Vendor",
+            "File Name", "Comments"]
+    for e in ["File Link", "Quoted Price"]:
+        if e in df.columns:
+            keep.append(e)
     df = df[[c for c in keep
              if c in df.columns]].copy()
 
-    # Clean
+    # ── Drop fully empty rows ──
     df = df[~(
         df["Category"].astype(str).str.strip()
-        .isin(["","nan"]) &
+        .isin(["", "nan"]) &
         df["Vendor"].astype(str).str.strip()
-        .isin(["","nan"]))].copy()
+        .isin(["", "nan"]))].copy()
 
     for col in df.columns:
         df[col] = (df[col].fillna("")
                    .astype(str).str.strip())
     df.reset_index(drop=True, inplace=True)
 
-    # File link column
+    # ── File link column ──
     df["Hyperlink"] = ""
     if "File Link" in df.columns:
         df["Hyperlink"] = df["File Link"].apply(
-            lambda x: "" if x in ["","nan"] else x)
+            lambda x: ""
+            if x in ["", "nan"] else x)
 
-    # ── Parse services — handles ALL newline types ──
+    # ── Parse services ──
     def parse_svc(v):
-        if not v or str(v).strip() in ["","nan","None"]:
+        if not v or str(v).strip() in [
+                "", "nan", "None"]:
             return ["(unspecified)"]
         s = str(v)
-        # Normalise all newline variants
         s = s.replace("\\n", "\n")
         s = s.replace("\r\n", "\n")
         s = s.replace("\r", "\n")
         parts = [
             p.strip() for p in s.split("\n")
-            if p.strip() and p.strip() != "nan"]
+            if p.strip()
+            and p.strip() != "nan"]
         if not parts:
-            # Try semicolon
             parts = [
                 p.strip() for p in s.split(";")
                 if p.strip()]
         if not parts:
-            # Try comma (short values only)
             if len(s) < 300:
                 parts = [
                     p.strip() for p in s.split(",")
                     if p.strip()]
         return parts if parts else ["(unspecified)"]
 
-    df["Services List"] = df["Comments"].apply(parse_svc)
+    df["Services List"] = df["Comments"].apply(
+        parse_svc)
 
-    # Explode
+    # ── Explode services ──
     df_exp = df.explode("Services List").copy()
     df_exp.rename(
-        columns={"Services List":"Service"},
+        columns={"Services List": "Service"},
         inplace=True)
     df_exp["Service"] = (
-        df_exp["Service"].astype(str).str.strip())
+        df_exp["Service"]
+        .astype(str).str.strip())
     df_exp = df_exp[
         ~df_exp["Service"].isin(
-            ["","(unspecified)","nan","None"])
+            ["", "(unspecified)",
+             "nan", "None"])
     ].reset_index(drop=True)
 
     return df, df_exp
-
 # ════════════════════════════════════════════════════════════
 # REAL CATALOG ANALYZER
 # Reads Master Catalog.xlsx → follows File Links
