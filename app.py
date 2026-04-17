@@ -536,6 +536,7 @@ def generate_selection_verdict(
 # ════════════════════════════════════════════════════════════
 @st.cache_data
 @st.cache_data
+@st.cache_data
 def load_data():
     CSV_PATH = "master_catalog.csv"
     XLS_PATH = "Master Catalog.xlsx"
@@ -594,51 +595,54 @@ def load_data():
         if req not in df.columns:
             df[req] = ""
 
+    # ── Keep only needed string columns ──
     keep = ["Category", "Vendor", "File Name", "Comments"]
     for e in ["File Link", "Quoted Price"]:
         if e in df.columns:
             keep.append(e)
     df = df[[c for c in keep if c in df.columns]].copy()
 
-    # ── Drop fully empty rows ──
-    df = df[~(
-        df["Category"].apply(lambda x: str(x).strip()).isin(["", "nan"]) &
-        df["Vendor"].apply(lambda x: str(x).strip()).isin(["", "nan"])
-    )].copy()
-
-    # ── Clean all columns ──
+    # ── Clean all string columns NOW (before any list columns are added) ──
     for col in df.columns:
         df[col] = df[col].fillna("").apply(lambda x: str(x).strip())
+
+    df.reset_index(drop=True, inplace=True)
+
+    # ── Drop fully empty rows ──
+    df = df[~(
+        df["Category"].apply(lambda x: x in ["", "nan"]) &
+        df["Vendor"].apply(lambda x: x in ["", "nan"])
+    )].copy()
     df.reset_index(drop=True, inplace=True)
 
     # ── File link column ──
     df["Hyperlink"] = ""
     if "File Link" in df.columns:
-        df["Hyperlink"] = df["File Link"].apply(lambda x: "" if x in ["", "nan"] else x)
+        df["Hyperlink"] = df["File Link"].apply(
+            lambda x: "" if x in ["", "nan"] else x)
 
     # ── Parse services ──
     def parse_svc(v):
         if not v or str(v).strip() in ["", "nan", "None"]:
             return ["(unspecified)"]
         s = str(v)
-        s = s.replace("\\n", "\n")
-        s = s.replace("\r\n", "\n")
-        s = s.replace("\r", "\n")
+        s = s.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
         parts = [p.strip() for p in s.split("\n") if p.strip() and p.strip() != "nan"]
         if not parts:
             parts = [p.strip() for p in s.split(";") if p.strip()]
-        if not parts:
-            if len(s) < 300:
-                parts = [p.strip() for p in s.split(",") if p.strip()]
+        if not parts and len(s) < 300:
+            parts = [p.strip() for p in s.split(",") if p.strip()]
         return parts if parts else ["(unspecified)"]
 
+    # ── Add list column AFTER string cleaning is done ──
     df["Services List"] = df["Comments"].apply(parse_svc)
 
     # ── Explode services ──
     df_exp = df.explode("Services List").copy()
     df_exp.rename(columns={"Services List": "Service"}, inplace=True)
     df_exp["Service"] = df_exp["Service"].apply(lambda x: str(x).strip())
-    df_exp = df_exp[~df_exp["Service"].isin(["", "(unspecified)", "nan", "None"])].reset_index(drop=True)
+    df_exp = df_exp[~df_exp["Service"].isin(
+        ["", "(unspecified)", "nan", "None"])].reset_index(drop=True)
 
     return df, df_exp
 # ════════════════════════════════════════════════════════════
