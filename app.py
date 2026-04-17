@@ -1217,6 +1217,76 @@ def kpi(col, val, lbl, bg):
         "</div>".format(bg, val, lbl),
         unsafe_allow_html=True)
 
+def mini_kpi(col, val, lbl, bg, icon=""):
+    col.markdown(
+        "<div class='kpi-box' style='background:{};min-height:80px'>"
+        "<div style='font-size:1.5em;margin-bottom:2px'>{}</div>"
+        "<div class='kpi-value' style='font-size:1.4em'>{}</div>"
+        "<div class='kpi-label'>{}</div>"
+        "</div>".format(bg, icon, val, lbl),
+        unsafe_allow_html=True)
+
+def catalog_section_title(txt):
+    """Clean block-level heading — no arrow overlap."""
+    st.markdown(
+        "<div style='display:block;font-size:0.78em;"
+        "font-weight:700;letter-spacing:1px;"
+        "text-transform:uppercase;color:#D04A02;"
+        "margin:18px 0 8px 0;line-height:1.4'>"
+        "{}</div>".format(txt),
+        unsafe_allow_html=True)
+
+# ── Subcategory inference (used only in tab0) ──────────────────────────────
+def infer_subcategory(category, comments, file_name):
+    txt = (str(comments) + " " + str(file_name)).lower()
+    cat = str(category).lower().strip()
+
+    if "cybersecurity" in cat:
+        if any(k in txt for k in ["trendmicro","trend micro","endpoint","antivirus"]): return "Endpoint Protection"
+        if any(k in txt for k in ["cyberark","privileged","pam"]):                     return "Privileged Access Mgmt"
+        if any(k in txt for k in ["knowbe4","awareness","phishing","training"]):        return "Security Awareness"
+        if any(k in txt for k in ["forescout","nac","network access"]):                 return "Network Access Control"
+        if any(k in txt for k in ["siem","splunk","monitor","log"]):                    return "SIEM / Monitoring"
+        if any(k in txt for k in ["vulnerability","scan","qualys"]):                    return "Vulnerability Mgmt"
+        return "General Security"
+
+    if "network" in cat or "telecom" in cat:
+        if any(k in txt for k in ["cisco ise","ise"]):          return "Cisco ISE"
+        if "meraki" in txt:                                      return "Cisco Meraki"
+        if "palo alto" in txt:                                   return "Palo Alto NGFW"
+        if "solarwinds" in txt:                                  return "SolarWinds"
+        if "equinix" in txt:                                     return "Equinix Interconnect"
+        if "cisco" in txt:                                       return "Cisco Networking"
+        return "General Network"
+
+    if "hosting" in cat:
+        if any(k in txt for k in ["vmware","vcf"]):              return "VMware"
+        if "oracle" in txt:                                      return "Oracle DB"
+        if "netapp" in txt:                                      return "NetApp Storage"
+        if any(k in txt for k in ["colocation","colo","equinix"]): return "Colocation Build"
+        if "windows server" in txt:                              return "Windows Server"
+        if "ibm" in txt:                                         return "IBM Power"
+        return "General Hosting"
+
+    if "m365" in cat or "power platform" in cat:
+        if any(k in txt for k in ["sharegate","migrate"]):       return "Migration Tools"
+        if "copilot" in txt:                                     return "Copilot / AI"
+        if any(k in txt for k in ["power bi","powerbi"]):        return "Power BI"
+        if "teams" in txt:                                       return "Teams"
+        return "M365 Licensing"
+
+    if "idam" in cat or "iam" in cat:
+        if "consulting" in txt:                                  return "AD Migration Consulting"
+        return "Identity Migration"
+
+    if "snow" in cat or "servicenow" in cat:
+        return "ServiceNow ITSM"
+
+    if "summary" in cat or "reporting" in cat:
+        return "Reporting & Tracking"
+
+    return str(category).strip().title()
+
 # ════════════════════════════════════════════════════════════
 # SIDEBAR
 # ════════════════════════════════════════════════════════════
@@ -1411,14 +1481,15 @@ if not NO_DATA:
 # ════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════
-tab1,tab2,tab3,tab4,tab5,tab6,tab7 = st.tabs([
+tab0,tab1,tab2,tab3,tab4,tab5,tab6,tab7 = st.tabs([
+    "🗂️ Catalog Overview",
     "📊 Analytics",
     "📋 Browse & Verdict",
     "📤 Upload & Score",
     "📄 Data Table",
     "🗂 Upload Catalog",
     "🔍 Vendor Analysis",
-    "📂 Real Analysis",      
+    "📂 Real Analysis",
 ])
 # ════════════════════════════════════════════════════════════
 # GITHUB FILE LOADER
@@ -1486,6 +1557,590 @@ def get_price_for_row(row, gh_prices):
     if qp > 0:
         return qp,  "catalog"
     return 0.0, "none"
+
+# ════════════════════════════════════════════════════════════
+# TAB 0 — CATALOG OVERVIEW (reads Master_Catalog_1_.xlsx)
+# ════════════════════════════════════════════════════════════
+with tab0:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab.")
+    else:
+        # ── Build enriched working copy ───────────────────────
+        df_ov = df_master.copy()
+        df_ov["Subcategory"] = df_ov.apply(
+            lambda r: infer_subcategory(
+                r.get("Category",""),
+                r.get("Comments",""),
+                r.get("File Name","")), axis=1)
+
+        all_cats_ov = sorted([
+            c for c in df_ov["Category"].unique()
+            if str(c).strip() not in ["","nan"]])
+
+        # ── Page header ───────────────────────────────────────
+        st.markdown(
+            "<div style='background:#2D2D2D;color:white;"
+            "padding:20px 28px;border-radius:4px;"
+            "border-left:6px solid #D04A02;"
+            "margin-bottom:22px'>"
+            "<div style='font-size:0.72em;font-weight:700;"
+            "letter-spacing:2px;text-transform:uppercase;"
+            "color:#D04A02;margin-bottom:5px'>"
+            "Master Catalog Intelligence</div>"
+            "<h1 style='margin:0;font-size:1.4em;"
+            "font-weight:700;color:white'>"
+            "Catalog Overview</h1>"
+            "<p style='margin:6px 0 0;opacity:0.6;"
+            "font-size:0.85em'>"
+            "Categories · Subcategories · Vendors · "
+            "Services · Quotations — from Master_Catalog_1_.xlsx"
+            "</p></div>",
+            unsafe_allow_html=True)
+
+        # ── Top KPIs ──────────────────────────────────────────
+        k0a,k0b,k0c,k0d,k0e = st.columns(5)
+        mini_kpi(k0a, len(df_ov),
+                 "Total Quotations", "#D04A02", "📄")
+        mini_kpi(k0b, df_ov["Vendor"].nunique(),
+                 "Unique Vendors", "#295477", "🏢")
+        mini_kpi(k0c, df_ov["Category"].nunique(),
+                 "Categories", "#299D8F", "📂")
+        mini_kpi(k0d, df_ov["Subcategory"].nunique(),
+                 "Subcategories", "#EB8C00", "🏷️")
+        mini_kpi(k0e,
+                 df_exploded["Service"].nunique()
+                 if df_exploded is not None else "—",
+                 "Unique Services", "#2D2D2D", "🛠")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Category cards row ────────────────────────────────
+        catalog_section_title("CATEGORIES AT A GLANCE")
+
+        # Build per-category stats
+        cat_stats = []
+        for cat in all_cats_ov:
+            d_cat = df_ov[df_ov["Category"] == cat]
+            n_quotes   = len(d_cat)
+            n_vendors  = d_cat["Vendor"].nunique()
+            n_subscat  = d_cat["Subcategory"].nunique()
+            # count services via exploded
+            if df_exploded is not None:
+                n_svcs = df_exploded[
+                    df_exploded["Category"] == cat
+                ]["Service"].nunique()
+            else:
+                n_svcs = 0
+            cat_stats.append({
+                "Category"    : cat,
+                "Quotations"  : n_quotes,
+                "Vendors"     : n_vendors,
+                "Subcategories": n_subscat,
+                "Services"    : n_svcs,
+            })
+        cat_stats_df = pd.DataFrame(cat_stats).sort_values(
+            "Quotations", ascending=False)
+
+        # Render as mini-cards, 3 per row
+        CAT_ICONS = {
+            "Cybersecurity"         : "🛡️",
+            "Network & Telecom"     : "🌐",
+            "Hosting"               : "🖥️",
+            "M365 & Power Platform" : "☁️",
+            "IdAM"                  : "🔑",
+            "Service Management (SNow)": "⚙️",
+            "Summary & Reporting"   : "📊",
+            "Fabric"                : "🔌",
+            "Internet access"       : "🌍",
+            "Power"                 : "⚡",
+            "PDU Hosting"           : "🔋",
+        }
+        CAT_COLORS = [
+            "#D04A02","#295477","#299D8F","#EB8C00",
+            "#6E2585","#22992E","#E0301E","#004F9F",
+            "#8C8C8C","#FFB600","#299D8F","#D04A02",
+        ]
+
+        rows_of_3 = [
+            cat_stats_df.iloc[i:i+3]
+            for i in range(0, len(cat_stats_df), 3)]
+        for row_chunk in rows_of_3:
+            cols = st.columns(len(row_chunk), gap="medium")
+            for col_idx, (_, row_s) in enumerate(
+                    row_chunk.iterrows()):
+                cat_name = row_s["Category"]
+                icon  = CAT_ICONS.get(cat_name, "📁")
+                cidx  = all_cats_ov.index(cat_name) \
+                        if cat_name in all_cats_ov else 0
+                color = CAT_COLORS[cidx % len(CAT_COLORS)]
+                cols[col_idx].markdown(
+                    "<div style='background:white;"
+                    "border:1px solid #e0e0e0;"
+                    "border-radius:6px;padding:16px 18px;"
+                    "border-top:4px solid {};"
+                    "height:100%'>"
+                    "<div style='font-size:1.4em;"
+                    "margin-bottom:6px'>{}</div>"
+                    "<div style='font-size:0.92em;"
+                    "font-weight:700;color:#2D2D2D;"
+                    "margin-bottom:10px;line-height:1.3'>"
+                    "{}</div>"
+                    "<div style='display:flex;gap:8px;"
+                    "flex-wrap:wrap'>"
+                    "<span style='background:#F3F3F3;"
+                    "border-radius:3px;padding:3px 8px;"
+                    "font-size:0.76em;font-weight:700;"
+                    "color:#2D2D2D'>📄 {} quotes</span>"
+                    "<span style='background:#F3F3F3;"
+                    "border-radius:3px;padding:3px 8px;"
+                    "font-size:0.76em;font-weight:700;"
+                    "color:#295477'>🏢 {} vendors</span>"
+                    "<span style='background:#F3F3F3;"
+                    "border-radius:3px;padding:3px 8px;"
+                    "font-size:0.76em;font-weight:700;"
+                    "color:#299D8F'>🛠 {} services</span>"
+                    "</div></div>".format(
+                        color, icon, cat_name,
+                        row_s["Quotations"],
+                        row_s["Vendors"],
+                        row_s["Services"]),
+                    unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Summary charts row ────────────────────────────────
+        catalog_section_title(
+            "DISTRIBUTION — QUOTATIONS & VENDORS BY CATEGORY")
+
+        ch_a, ch_b = st.columns(2, gap="large")
+
+        with ch_a:
+            fig_cat_q = go.Figure(go.Bar(
+                x=cat_stats_df["Category"],
+                y=cat_stats_df["Quotations"],
+                marker_color=[
+                    CAT_COLORS[all_cats_ov.index(c)
+                               % len(CAT_COLORS)]
+                    if c in all_cats_ov else "#8C8C8C"
+                    for c in cat_stats_df["Category"]],
+                marker_line_width=0,
+                text=cat_stats_df["Quotations"],
+                textposition="outside",
+                textfont=dict(size=11)))
+            fig_cat_q.update_layout(
+                height=340,
+                plot_bgcolor=CBG, paper_bgcolor=CBG,
+                margin=dict(l=5,r=10,t=30,b=10),
+                font=CFONT,
+                title=dict(
+                    text="Quotations per Category",
+                    font=dict(size=12,
+                              color="#2D2D2D",
+                              family="Source Sans Pro"),
+                    x=0, xanchor="left"),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="#E0E0E0",
+                    zeroline=False),
+                xaxis=dict(tickangle=-30,
+                           tickfont=dict(size=9.5)),
+                bargap=0.35, showlegend=False)
+            st.plotly_chart(fig_cat_q,
+                            use_container_width=True)
+
+        with ch_b:
+            fig_cat_v = go.Figure(go.Bar(
+                x=cat_stats_df["Category"],
+                y=cat_stats_df["Vendors"],
+                marker_color=[
+                    CAT_COLORS[all_cats_ov.index(c)
+                               % len(CAT_COLORS)]
+                    if c in all_cats_ov else "#8C8C8C"
+                    for c in cat_stats_df["Category"]],
+                marker_line_width=0,
+                text=cat_stats_df["Vendors"],
+                textposition="outside",
+                textfont=dict(size=11)))
+            fig_cat_v.update_layout(
+                height=340,
+                plot_bgcolor=CBG, paper_bgcolor=CBG,
+                margin=dict(l=5,r=10,t=30,b=10),
+                font=CFONT,
+                title=dict(
+                    text="Vendors per Category",
+                    font=dict(size=12,
+                              color="#2D2D2D",
+                              family="Source Sans Pro"),
+                    x=0, xanchor="left"),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="#E0E0E0",
+                    zeroline=False),
+                xaxis=dict(tickangle=-30,
+                           tickfont=dict(size=9.5)),
+                bargap=0.35, showlegend=False)
+            st.plotly_chart(fig_cat_v,
+                            use_container_width=True)
+
+        # ── Donut — category share of quotes ─────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        catalog_section_title(
+            "CATALOG COMPOSITION — QUOTE SHARE BY CATEGORY")
+
+        d_left, d_right = st.columns([1, 2], gap="large")
+        with d_left:
+            fig_donut = px.pie(
+                cat_stats_df,
+                values="Quotations",
+                names="Category",
+                hole=0.55,
+                color_discrete_sequence=CAT_COLORS)
+            fig_donut.update_traces(
+                textposition="outside",
+                textinfo="percent+label",
+                textfont_size=10,
+                pull=[0.03] * len(cat_stats_df))
+            fig_donut.update_layout(
+                height=360,
+                margin=dict(l=10,r=10,t=10,b=10),
+                paper_bgcolor=CBG,
+                font=CFONT,
+                showlegend=False)
+            st.plotly_chart(fig_donut,
+                            use_container_width=True)
+
+        with d_right:
+            # Summary table
+            tbl_rows = [
+                "<table class='comp-table'>"
+                "<thead><tr>"
+                "<th>Category</th>"
+                "<th style='text-align:center'>Quotes</th>"
+                "<th style='text-align:center'>Vendors</th>"
+                "<th style='text-align:center'>Services</th>"
+                "<th style='text-align:center'>Subcategories</th>"
+                "</tr></thead><tbody>"]
+            for _, row_s in cat_stats_df.iterrows():
+                cat_n = row_s["Category"]
+                cidx  = all_cats_ov.index(cat_n) \
+                        if cat_n in all_cats_ov else 0
+                color = CAT_COLORS[cidx % len(CAT_COLORS)]
+                icon  = CAT_ICONS.get(cat_n, "📁")
+                tbl_rows.append(
+                    "<tr>"
+                    "<td><span style='border-left:4px solid {};"
+                    "padding-left:8px;font-weight:600'>"
+                    "{} {}</span></td>"
+                    "<td style='text-align:center;"
+                    "font-weight:700;color:#D04A02'>{}</td>"
+                    "<td style='text-align:center;"
+                    "font-weight:700;color:#295477'>{}</td>"
+                    "<td style='text-align:center;"
+                    "font-weight:700;color:#299D8F'>{}</td>"
+                    "<td style='text-align:center;"
+                    "font-weight:700;color:#EB8C00'>{}</td>"
+                    "</tr>".format(
+                        color, icon, cat_n,
+                        row_s["Quotations"],
+                        row_s["Vendors"],
+                        row_s["Services"],
+                        row_s["Subcategories"]))
+            tbl_rows.append("</tbody></table>")
+            st.markdown("".join(tbl_rows),
+                        unsafe_allow_html=True)
+
+        # ── Per-category drill-down with sub-tabs ─────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        catalog_section_title(
+            "DRILL-DOWN BY CATEGORY — SUBCATEGORIES & VENDORS")
+
+        # Cybersecurity first, then others alphabetically
+        ordered_cats = (
+            ["Cybersecurity"]
+            + [c for c in all_cats_ov
+               if c != "Cybersecurity"])
+
+        cat_subtabs = st.tabs(
+            ["🛡️ {}".format(c) if c == "Cybersecurity"
+             else "{}".format(c)
+             for c in ordered_cats])
+
+        for tab_idx, cat_name in enumerate(ordered_cats):
+            with cat_subtabs[tab_idx]:
+                d_cat = df_ov[
+                    df_ov["Category"] == cat_name].copy()
+                if d_cat.empty:
+                    st.info(
+                        "No data for {}.".format(cat_name))
+                    continue
+
+                # ── Category KPI strip ────────────────────
+                ck1,ck2,ck3,ck4 = st.columns(4)
+                n_q   = len(d_cat)
+                n_v   = d_cat["Vendor"].nunique()
+                n_sub = d_cat["Subcategory"].nunique()
+                n_svc = (
+                    df_exploded[
+                        df_exploded["Category"]==cat_name
+                    ]["Service"].nunique()
+                    if df_exploded is not None else 0)
+
+                mini_kpi(ck1, n_q,  "Quotations",
+                         "#D04A02", "📄")
+                mini_kpi(ck2, n_v,  "Vendors",
+                         "#295477", "🏢")
+                mini_kpi(ck3, n_svc,"Services",
+                         "#299D8F", "🛠")
+                mini_kpi(ck4, n_sub,"Subcategories",
+                         "#EB8C00", "🏷️")
+                st.markdown("<br>",
+                            unsafe_allow_html=True)
+
+                # ── Subcategory breakdown ─────────────────
+                sub_stats = (
+                    d_cat.groupby("Subcategory")
+                    .agg(
+                        Quotations=("File Name","count"),
+                        Vendors=("Vendor","nunique"))
+                    .reset_index()
+                    .sort_values("Quotations",
+                                 ascending=False))
+
+                sc_col1, sc_col2 = st.columns(
+                    [1, 1], gap="medium")
+
+                with sc_col1:
+                    st.markdown(
+                        "<div style='font-size:0.78em;"
+                        "font-weight:700;letter-spacing:"
+                        "0.8px;text-transform:uppercase;"
+                        "color:#2D2D2D;margin-bottom:8px'>"
+                        "Subcategories</div>",
+                        unsafe_allow_html=True)
+                    # Horizontal bar for subcategories
+                    fig_sub = go.Figure(go.Bar(
+                        x=sub_stats["Quotations"],
+                        y=sub_stats["Subcategory"],
+                        orientation="h",
+                        marker_color="#D04A02",
+                        marker_line_width=0,
+                        text=sub_stats["Quotations"],
+                        textposition="outside",
+                        textfont=dict(size=10)))
+                    fig_sub.update_layout(
+                        height=max(
+                            220,
+                            len(sub_stats) * 38),
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=40,t=10,b=10),
+                        font=CFONT,
+                        xaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False,
+                            title="Quotations"),
+                        yaxis=dict(
+                            autorange="reversed",
+                            tickfont=dict(size=10)),
+                        bargap=0.3)
+                    st.plotly_chart(
+                        fig_sub,
+                        use_container_width=True)
+
+                with sc_col2:
+                    st.markdown(
+                        "<div style='font-size:0.78em;"
+                        "font-weight:700;letter-spacing:"
+                        "0.8px;text-transform:uppercase;"
+                        "color:#2D2D2D;margin-bottom:8px'>"
+                        "Vendors</div>",
+                        unsafe_allow_html=True)
+                    vnd_stats = (
+                        d_cat.groupby("Vendor")
+                        .agg(
+                            Quotations=("File Name","count"))
+                        .reset_index()
+                        .sort_values("Quotations",
+                                     ascending=False))
+                    fig_vnd = go.Figure(go.Bar(
+                        x=vnd_stats["Quotations"],
+                        y=vnd_stats["Vendor"],
+                        orientation="h",
+                        marker_color=[
+                            vendor_color_map.get(
+                                v,"#8C8C8C")
+                            for v in vnd_stats["Vendor"]],
+                        marker_line_width=0,
+                        text=vnd_stats["Quotations"],
+                        textposition="outside",
+                        textfont=dict(size=10)))
+                    fig_vnd.update_layout(
+                        height=max(
+                            220,
+                            len(vnd_stats) * 38),
+                        plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(
+                            l=5,r=40,t=10,b=10),
+                        font=CFONT,
+                        xaxis=dict(
+                            showgrid=True,
+                            gridcolor="#E0E0E0",
+                            zeroline=False,
+                            title="Quotations"),
+                        yaxis=dict(
+                            autorange="reversed",
+                            tickfont=dict(size=10)),
+                        bargap=0.3)
+                    st.plotly_chart(
+                        fig_vnd,
+                        use_container_width=True)
+
+                # ── Subcategory detail table ──────────────
+                st.markdown(
+                    "<div style='font-size:0.78em;"
+                    "font-weight:700;letter-spacing:0.8px;"
+                    "text-transform:uppercase;"
+                    "color:#2D2D2D;margin:10px 0 8px'>"
+                    "Subcategory Detail</div>",
+                    unsafe_allow_html=True)
+
+                sub_tbl = [
+                    "<table class='comp-table'>"
+                    "<thead><tr>"
+                    "<th>Subcategory</th>"
+                    "<th>Vendors</th>"
+                    "<th style='text-align:center'>"
+                    "Quotations</th>"
+                    "<th>Files</th>"
+                    "</tr></thead><tbody>"]
+
+                for si, (_, sr) in enumerate(
+                        sub_stats.iterrows()):
+                    bg = "white" if si % 2 == 0 \
+                         else "#F3F3F3"
+                    sub_name = sr["Subcategory"]
+                    # Get vendors for this subcategory
+                    d_sub = d_cat[
+                        d_cat["Subcategory"] == sub_name]
+                    vendors_in_sub = sorted(
+                        d_sub["Vendor"].unique())
+                    pills = " ".join([
+                        "<span class='vendor-badge' "
+                        "style='background:{}'>{}</span>"
+                        .format(
+                            vendor_color_map.get(
+                                v,"#8C8C8C"), v)
+                        for v in vendors_in_sub])
+                    files_list = ", ".join(
+                        d_sub["File Name"]
+                        .str[:30].tolist()[:3])
+                    if len(d_sub) > 3:
+                        files_list += " (+{} more)".format(
+                            len(d_sub) - 3)
+                    sub_tbl.append(
+                        "<tr style='background:{}'>"
+                        "<td style='font-weight:600'>"
+                        "{}</td>"
+                        "<td>{}</td>"
+                        "<td style='text-align:center;"
+                        "font-weight:700;"
+                        "color:#D04A02'>{}</td>"
+                        "<td style='font-size:0.78em;"
+                        "color:#555;font-family:"
+                        "monospace'>{}</td>"
+                        "</tr>".format(
+                            bg, sub_name,
+                            pills,
+                            sr["Quotations"],
+                            files_list))
+                sub_tbl.append("</tbody></table>")
+                st.markdown("".join(sub_tbl),
+                            unsafe_allow_html=True)
+
+                # ── Cybersecurity special callout ─────────
+                if cat_name == "Cybersecurity":
+                    st.markdown(
+                        "<br>", unsafe_allow_html=True)
+                    st.markdown(
+                        "<div style='background:#F8F0FF;"
+                        "border-left:5px solid #6E2585;"
+                        "border-radius:4px;"
+                        "padding:14px 18px;"
+                        "margin:6px 0'>"
+                        "<div style='font-size:0.70em;"
+                        "font-weight:700;letter-spacing:"
+                        "1px;text-transform:uppercase;"
+                        "color:#6E2585;"
+                        "margin-bottom:6px'>"
+                        "Cybersecurity Coverage</div>"
+                        "<div style='font-size:0.87em;"
+                        "color:#2D2D2D'>"
+                        "This category covers <b>{}</b> "
+                        "security subcategories across "
+                        "<b>{}</b> vendors with "
+                        "<b>{}</b> total quotation files. "
+                        "Vendors include: <b>{}</b>."
+                        "</div></div>".format(
+                            n_sub, n_v, n_q,
+                            ", ".join(sorted(
+                                d_cat["Vendor"]
+                                .unique()))),
+                        unsafe_allow_html=True)
+
+                # ── Quotation file list (collapsible) ─────
+                with st.expander(
+                        "📄 All {} quotation files "
+                        "in {}".format(
+                            len(d_cat), cat_name),
+                        expanded=False):
+                    file_tbl = [
+                        "<table class='comp-table'>"
+                        "<thead><tr>"
+                        "<th>File Name</th>"
+                        "<th>Vendor</th>"
+                        "<th>Subcategory</th>"
+                        "<th>Services / Comments</th>"
+                        "</tr></thead><tbody>"]
+                    for fi,(_, fr) in enumerate(
+                            d_cat.sort_values(
+                                "Subcategory"
+                            ).iterrows()):
+                        bg  = ("white" if fi%2==0
+                               else "#F3F3F3")
+                        vc  = vendor_color_map.get(
+                            fr["Vendor"],"#8C8C8C")
+                        cmt = str(
+                            fr.get("Comments","")
+                        ).replace("\n", " · ")[:80]
+                        file_tbl.append(
+                            "<tr style='background:{}'>"
+                            "<td style='font-family:"
+                            "monospace;font-size:0.78em;"
+                            "word-break:break-all'>"
+                            "{}</td>"
+                            "<td>{}</td>"
+                            "<td style='color:#555;"
+                            "font-size:0.82em'>{}</td>"
+                            "<td style='font-size:"
+                            "0.80em;color:#2D2D2D'>"
+                            "{}</td>"
+                            "</tr>".format(
+                                bg,
+                                fr.get("File Name",""),
+                                "<span class='"
+                                "vendor-badge' style='"
+                                "background:{}'>{}</span>"
+                                .format(
+                                    vc,
+                                    fr["Vendor"]),
+                                fr["Subcategory"],
+                                cmt))
+                    file_tbl.append("</tbody></table>")
+                    st.markdown("".join(file_tbl),
+                                unsafe_allow_html=True)
+
+
 # ════════════════════════════════════════════════════════════
 # TAB 1 — ANALYTICS
 # ════════════════════════════════════════════════════════════
