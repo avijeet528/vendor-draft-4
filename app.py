@@ -1074,6 +1074,957 @@ with tab0:
                         "</div></div>".format(n_sub,n_v,n_q,", ".join(sorted(d_cat["Vendor"].unique()))),
                         unsafe_allow_html=True)
 
-                # File list
-                static_section_header("📄 All {} quotation files in {}".format(len(d_cat), cat_name), P
+                static_section_header("📄 All {} quotation files in {}".format(len(d_cat), cat_name), PwC_BLUE)
+                with st.container():
+                    file_tbl = ["<table class='comp-table'><thead><tr>"
+                                "<th>File Name</th><th>Vendor</th><th>Subcategory</th>"
+                                "<th>Services / Comments</th></tr></thead><tbody>"]
+                    for fi,(_, fr) in enumerate(d_cat.sort_values("Subcategory").iterrows()):
+                        bg  = "white" if fi%2==0 else "#F3F3F3"
+                        vc  = vendor_color_map.get(fr["Vendor"], PwC_GREY)
+                        cmt = str(fr.get("Comments","")).replace("\n"," · ")[:80]
+                        file_tbl.append(
+                            "<tr style='background:{}'>"
+                            "<td style='font-family:monospace;font-size:0.78em;word-break:break-all'>{}</td>"
+                            "<td><span class='vendor-badge' style='background:{}'>{}</span></td>"
+                            "<td style='color:#555;font-size:0.82em'>{}</td>"
+                            "<td style='font-size:0.80em;color:#2D2D2D'>{}</td>"
+                            "</tr>".format(bg, fr.get("File Name",""), vc, fr["Vendor"],
+                                           fr["Subcategory"], cmt))
+                    file_tbl.append("</tbody></table>")
+                    st.markdown("".join(file_tbl), unsafe_allow_html=True)
 
+
+# ════════════════════════════════════════════════════════════
+# TAB 1 — ANALYTICS
+# ════════════════════════════════════════════════════════════
+with tab1:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab.")
+    else:
+        use_df = d_filt if not d_filt.empty else df_exploded
+        col_l, col_r = st.columns(2, gap="large")
+
+        with col_l:
+            section_title("SERVICE OVERLAP ANALYSIS", "Orange = quoted by multiple vendors.")
+            shared = (use_df.groupby("Service")["Vendor"].nunique()
+                      .sort_values(ascending=False).head(20).reset_index())
+            shared.columns = ["Service","Vendor Count"]
+            shared["Color"] = shared["Vendor Count"].apply(lambda x: PwC_ORANGE if x>1 else "#C0C0C0")
+            fig1 = go.Figure(go.Bar(
+                x=shared["Vendor Count"], y=shared["Service"].apply(lambda x: x[:44]),
+                orientation="h", marker_color=shared["Color"], marker_line_width=0,
+                text=shared["Vendor Count"], textposition="outside", textfont=dict(size=10)))
+            fig1.update_layout(height=480, plot_bgcolor=CBG, paper_bgcolor=CBG,
+                                margin=dict(l=5,r=40,t=20,b=10), font=CFONT,
+                                xaxis=dict(title="Vendors",showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                yaxis=dict(autorange="reversed",tickfont=dict(size=9.5)), bargap=0.35)
+            st.plotly_chart(fig1, use_container_width=True)
+
+        with col_r:
+            section_title("VENDOR SERVICE COVERAGE", "Higher = broader capability.")
+            spv = (use_df.groupby("Vendor")["Service"].nunique()
+                   .sort_values(ascending=False).reset_index())
+            spv.columns = ["Vendor","Count"]
+            spv["Color"] = [vendor_color_map.get(v, PwC_GREY) for v in spv["Vendor"]]
+            fig2 = go.Figure(go.Bar(
+                x=spv["Vendor"], y=spv["Count"], marker_color=spv["Color"],
+                marker_line_width=0, text=spv["Count"], textposition="outside", textfont=dict(size=10)))
+            fig2.update_layout(height=480, plot_bgcolor=CBG, paper_bgcolor=CBG,
+                                margin=dict(l=5,r=10,t=20,b=10), font=CFONT,
+                                yaxis=dict(title="Unique Services",showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                xaxis=dict(tickangle=-35,tickfont=dict(size=9.5)), bargap=0.35)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        section_title("CATEGORY DISTRIBUTION", "Share of quote files across categories.")
+        cat_c = (use_df.drop_duplicates(subset=["Category","File Name"])
+                 .groupby("Category").size().reset_index())
+        cat_c.columns = ["Category","Count"]
+        if not cat_c.empty:
+            fig3 = px.pie(cat_c, names="Category", values="Count", hole=0.50,
+                          color_discrete_sequence=COLORS)
+            fig3.update_traces(textposition="outside", textinfo="label+percent",
+                                textfont_size=11, pull=[0.03]*len(cat_c))
+            fig3.update_layout(height=380, margin=dict(l=20,r=20,t=20,b=20),
+                                paper_bgcolor=CBG, font=CFONT,
+                                legend=dict(orientation="v",x=1.02,y=0.5,font=dict(size=10)))
+            st.plotly_chart(fig3, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("AI VENDOR SUMMARY")
+        ai_box(ai_service_summary(df_master, df_exploded))
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 2 — BROWSE & VERDICT
+# ════════════════════════════════════════════════════════════
+with tab2:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab.")
+    elif not selected_svcs:
+        st.info("👈 Select services from the sidebar to browse quotations and see the verdict.")
+    else:
+        use_filt2 = d_filt if not d_filt.empty else df_exploded
+        d_sel = use_filt2[use_filt2["Service"].isin(selected_svcs)].copy()
+
+        if d_sel.empty:
+            st.warning("No results found.")
+        else:
+            has_price = "Quoted Price" in d_sel.columns
+
+            # Collect vendor prices
+            vendor_prices_map = {}
+            for _, r in d_sel.drop_duplicates(subset=["Vendor","File Name"]).iterrows():
+                v  = r["Vendor"]
+                qp = _parse_num(str(r.get("Quoted Price","")).strip())
+                ck = "px_{}".format(str(r.get("File Name","")).strip())
+                ca = st.session_state.get(ck)
+                ep = ca["price_num"] if ca else 0.0
+                ref = ep if ep > 0 else qp
+                if ref > 0:
+                    vendor_prices_map[v] = min(vendor_prices_map.get(v, ref), ref)
+
+            if not vendor_prices_map:
+                for _, r in d_sel.drop_duplicates(subset=["Vendor"]).iterrows():
+                    v  = r["Vendor"]
+                    qp = _parse_num(str(r.get("Quoted Price","")).strip())
+                    if qp > 0 and v not in vendor_prices_map:
+                        vendor_prices_map[v] = qp
+
+            verdict = generate_selection_verdict(selected_svcs, d_sel, vendor_prices_map, df_exploded)
+
+            # Verdict banner
+            if verdict and verdict["has_prices"]:
+                section_title("PROCUREMENT VERDICT")
+                best_p  = verdict["best_price"];  worst_p = verdict["worst_price"]
+                avg_p   = verdict["avg_price"];   spread  = verdict["spread"]
+                best_v  = verdict["best_vendor"]
+
+                vc1,vc2,vc3,vc4 = st.columns(4)
+                vc1.markdown("<div class='score-card green'>"
+                             "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:#22992E'>Best Price</div>"
+                             "<div style='font-size:1.6em;font-weight:800;color:#22992E'>{}</div>"
+                             "<div style='font-size:0.75em;color:#555;margin-top:2px'>by {}</div>"
+                             "</div>".format(_fmt(best_p), best_v), unsafe_allow_html=True)
+                vc2.markdown("<div class='score-card yellow'>"
+                             "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:#856404'>Avg Price</div>"
+                             "<div style='font-size:1.6em;font-weight:800;color:#856404'>{}</div>"
+                             "<div style='font-size:0.75em;color:#555;margin-top:2px'>{} vendors</div>"
+                             "</div>".format(_fmt(avg_p), len(vendor_prices_map)), unsafe_allow_html=True)
+                vc3.markdown("<div class='score-card red'>"
+                             "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:#E0301E'>Highest Price</div>"
+                             "<div style='font-size:1.6em;font-weight:800;color:#E0301E'>{}</div>"
+                             "<div style='font-size:0.75em;color:#555;margin-top:2px'>by {}</div>"
+                             "</div>".format(_fmt(worst_p), verdict["worst_vendor"]), unsafe_allow_html=True)
+
+                spread_css = "red" if spread>20 else "yellow" if spread>10 else "green"
+                spread_col = score_color(100-min(spread*2,100))
+                vc4.markdown("<div class='score-card {}'>"
+                             "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:{}'>Price Spread</div>"
+                             "<div style='font-size:1.6em;font-weight:800;color:{}'>{}%</div>"
+                             "<div style='font-size:0.75em;color:#555;margin-top:2px'>negotiation room</div>"
+                             "</div>".format(spread_css, spread_col, spread_col, spread), unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                for line in verdict["lines"]:
+                    st.markdown("<div style='background:white;border-left:4px solid #D04A02;padding:8px 14px;"
+                                "border-radius:2px;margin-bottom:6px;font-size:0.87em'>▸ {}</div>".format(line),
+                                unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("PRICE COMPARISON — ALL VENDORS")
+                chart_rows = [{"Vendor":v,"Price":p,"Color":vendor_color_map.get(v,PwC_GREY)}
+                               for v,p in sorted(vendor_prices_map.items(), key=lambda x:x[1])]
+                if chart_rows:
+                    cdf = pd.DataFrame(chart_rows)
+                    cf  = go.Figure(go.Bar(x=cdf["Vendor"], y=cdf["Price"],
+                                           marker_color=cdf["Color"], marker_line_width=0,
+                                           text=cdf["Price"].apply(_fmt), textposition="outside"))
+                    cf.add_hline(y=avg_p, line_dash="dash", line_color=PwC_YELLOW, line_width=2,
+                                  annotation_text="Avg: {}".format(_fmt(avg_p)), annotation_position="top right")
+                    cf.update_layout(height=320, plot_bgcolor=CBG, paper_bgcolor=CBG,
+                                      margin=dict(l=5,r=10,t=20,b=10), font=CFONT,
+                                      yaxis=dict(title="Price (USD)",showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                      xaxis=dict(tickangle=-20), bargap=0.4)
+                    st.plotly_chart(cf, use_container_width=True)
+
+                # Score card table
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("VENDOR PRICE SCORE CARD")
+                all_p_vals = list(vendor_prices_map.values())
+                rows = ["<table class='comp-table'><thead><tr><th>Vendor</th><th>Price</th>"
+                        "<th>vs Average</th><th>Price Score</th><th>Verdict</th></tr></thead><tbody>"]
+                for i,(v,p) in enumerate(sorted(vendor_prices_map.items(), key=lambda x:x[1])):
+                    bg  = "white" if i%2==0 else "#F3F3F3"
+                    vc  = vendor_color_map.get(v, PwC_GREY)
+                    others = [px for px in all_p_vals if px != p]
+                    ps  = None
+                    if p > 0 and others:
+                        ps,_,_,_,_ = price_score(p, others)
+                    sc  = score_color(ps)
+                    pct_vs = round((p-avg_p)/avg_p*100,1) if avg_p > 0 else 0
+                    vs_txt = ("{}% below avg".format(abs(pct_vs)) if pct_vs < 0
+                              else "{}% above avg".format(abs(pct_vs)) if pct_vs > 0 else "At average")
+                    vs_col = PwC_GREEN if pct_vs < 0 else PwC_RED if pct_vs > 5 else "#856404"
+                    vt,_,vc_col = get_verdict(ps)
+                    rows.append("<tr style='background:{}'><td>{}</td>"
+                                "<td style='font-family:monospace;font-weight:700'>{}</td>"
+                                "<td style='color:{}'>{}</td>"
+                                "<td style='text-align:center'><span style='font-weight:800;font-size:1.1em;color:{}'>{}/100</span></td>"
+                                "<td><span style='color:{};font-weight:700;font-size:0.85em'>{}</span></td>"
+                                "</tr>".format(bg, vendor_pill(v,vc), _fmt(p),
+                                               vs_col, vs_txt, sc,
+                                               ps if ps is not None else "—",
+                                               vc_col, vt))
+                rows.append("</tbody></table>")
+                st.markdown("".join(rows), unsafe_allow_html=True)
+                st.markdown("<hr style='border:none;border-top:2px solid #D04A02;margin:20px 0'>",
+                            unsafe_allow_html=True)
+
+            elif verdict and not verdict["has_prices"]:
+                st.info("Services found but no price data. Click **Extract Prices** in the tables below.")
+
+            # Per-service tables
+            section_title("QUOTATION FILES — PER SERVICE")
+            vsmap = defaultdict(set)
+            for _, r in d_sel.iterrows(): vsmap[r["Vendor"]].add(r["Service"])
+            vendors_all = sorted([v for v,s in vsmap.items() if set(selected_svcs).issubset(s)])
+
+            if len(selected_svcs) > 1:
+                if vendors_all:
+                    st.success("✅ {} vendor(s) cover ALL {} services: {}".format(
+                        len(vendors_all), len(selected_svcs),
+                        " · ".join(["**{}**".format(v) for v in vendors_all])))
+                else:
+                    st.warning("No single vendor covers all {} selected services.".format(len(selected_svcs)))
+
+            for svc in selected_svcs:
+                d_svc = (d_sel[d_sel["Service"]==svc]
+                         .drop_duplicates(subset=["Vendor","File Name"])
+                         .sort_values("Vendor"))
+                vc    = d_svc["Vendor"].nunique()
+                s_tag = "SHARED" if vc>1 else "SINGLE VENDOR"
+
+                static_section_header("{}  —  {} vendor(s) · {} file(s) · {}".format(svc,vc,len(d_svc),s_tag))
+                with st.container():
+                    pills = " ".join([vendor_pill(v, vendor_color_map.get(v,PwC_GREY))
+                                      for v in sorted(d_svc["Vendor"].unique())])
+                    st.markdown("<div style='margin-bottom:12px'><b style='font-size:0.87em'>Vendors:</b>"
+                                "&nbsp;&nbsp;{}</div>".format(pills), unsafe_allow_html=True)
+
+                    all_prices_svc = []
+                    for _,r in d_svc.iterrows():
+                        qp = _parse_num(str(r.get("Quoted Price","")).strip())
+                        if qp > 0: all_prices_svc.append(qp)
+                        ck = "px_{}".format(str(r.get("File Name","")).strip())
+                        ca = st.session_state.get(ck)
+                        if ca and ca.get("price_num",0) > 0: all_prices_svc.append(ca["price_num"])
+
+                    rows = ["<table class='comp-table'><thead><tr>"
+                            "<th>Vendor</th><th>Category</th><th>File Name</th>"]
+                    if has_price: rows.append("<th>Quoted Price</th>")
+                    rows.append("<th>Extracted</th><th>Score</th><th>Verdict</th><th>Open</th></tr></thead><tbody>")
+
+                    for i,(_,row) in enumerate(d_svc.iterrows()):
+                        bg    = "white" if i%2==0 else "#F3F3F3"
+                        vc2   = vendor_color_map.get(row["Vendor"], PwC_GREY)
+                        fname = str(row.get("File Name","")).strip()
+                        url   = resolve_url(row)
+                        qp_str= str(row.get("Quoted Price","")).strip()
+                        qp_num= _parse_num(qp_str)
+                        ck    = "px_{}".format(fname)
+                        cached= st.session_state.get(ck)
+                        if cached and cached.get("price_num",0) > 0:
+                            ep_fmt = _fmt(cached["price"]); ref = cached["price_num"]
+                        elif qp_num > 0:
+                            ep_fmt = "—"; ref = qp_num
+                        else:
+                            ep_fmt = "—"; ref = 0
+                        others = [p for p in all_prices_svc if p != ref]
+                        ps = None; vt = "—"; vc_col = "#bbb"
+                        if ref > 0 and others:
+                            ps,_,_,_,_ = price_score(ref, others)
+                            vt,_,vc_col = get_verdict(ps)
+                        sc = score_color(ps)
+                        link_cell = ("<a href='{}' target='_blank' style='color:#D04A02;font-weight:600;"
+                                     "text-decoration:none'>📂 Open</a>".format(url) if url else "—")
+                        rows.append("<tr style='background:{}'><td>{}</td>"
+                                    "<td style='color:#555'>{}</td>"
+                                    "<td style='font-family:monospace;font-size:0.79em;word-break:break-all'>{}</td>".format(
+                                        bg, vendor_pill(row["Vendor"],vc2), row.get("Category",""), fname))
+                        if has_price:
+                            rows.append("<td style='color:#22992E;font-weight:700;font-family:monospace'>{}</td>".format(
+                                _fmt(qp_str) if qp_num > 0 else "—"))
+                        rows.append("<td style='color:#295477;font-weight:700;font-family:monospace'>{}</td>"
+                                    "<td style='text-align:center'><span style='font-weight:800;color:{}'>{}</span></td>"
+                                    "<td><span style='color:{};font-weight:700;font-size:0.82em'>{}</span></td>"
+                                    "<td>{}</td></tr>".format(
+                                        ep_fmt, sc,
+                                        "{}/100".format(ps) if ps is not None else "—",
+                                        vc_col, vt, link_cell))
+                    rows.append("</tbody></table>")
+                    st.markdown("".join(rows), unsafe_allow_html=True)
+
+                    if all_prices_svc:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        ai_box(ai_price_insight(0, all_prices_svc,
+                                                {v:p for v,p in vendor_prices_map.items() if p > 0}))
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Extract Prices — {}".format(svc[:40]),
+                                  key="ep_{}".format(svc[:35]), type="primary"):
+                        prog = st.progress(0); n = len(d_svc)
+                        for ki,(_,row2) in enumerate(d_svc.iterrows()):
+                            fname2 = str(row2.get("File Name","")).strip()
+                            ck2    = "px_{}".format(fname2)
+                            if st.session_state.get(ck2) is None:
+                                local = os.path.join(DEMO_DIR, fname2)
+                                if os.path.exists(local):
+                                    st.session_state[ck2] = extract_price_from_file(local)
+                                else:
+                                    url2 = resolve_url(row2)
+                                    if url2 and url2.startswith("http") and REQUESTS_OK:
+                                        try:
+                                            resp = requests.get(url2, timeout=20)
+                                            ext2 = url2.split("?")[0].rsplit(".",1)[-1].lower()
+                                            st.session_state[ck2] = extract_price_from_bytes(resp.content, ext2)
+                                        except Exception: pass
+                            prog.progress((ki+1)/n)
+                        prog.empty(); st.rerun()
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 3 — UPLOAD & SCORE
+# ════════════════════════════════════════════════════════════
+with tab3:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab.")
+    else:
+        pwc_header("New Quotation Analysis", "Upload → auto-extract price → score & verdict vs history")
+        section_title("STEP 1 — UPLOAD FILE")
+        uploaded = st.file_uploader("Upload", type=["pdf","xlsx","xls","docx"], label_visibility="collapsed")
+
+        if uploaded is not None:
+            content  = uploaded.read()
+            ext      = uploaded.name.rsplit(".",1)[-1]
+            fname_up = uploaded.name
+            st.success("Uploaded: **{}** ({} KB)".format(fname_up, round(len(content)/1024,1)))
+
+            section_title("STEP 2 — EXTRACTED PRICE")
+            with st.spinner("Extracting price…"):
+                result    = extract_price_from_bytes(content, ext)
+                new_price = result["price_num"]
+
+            if new_price > 0:
+                st.markdown("<div class='score-card green'>"
+                            "<div style='font-size:0.72em;font-weight:700;text-transform:uppercase;color:#22992E'>Extracted Price</div>"
+                            "<div style='font-size:2.0em;font-weight:800;color:#22992E'>{}</div>"
+                            "</div>".format(_fmt(new_price)), unsafe_allow_html=True)
+            else:
+                st.warning("Price not found automatically.")
+                manual = st.number_input("Enter price manually (USD)", min_value=0.0, step=100.0, value=0.0, key="manual_price_input")
+                if manual > 0:
+                    new_price = manual
+                    st.success("Using manual price: **{}**".format(_fmt(manual)))
+
+            section_title("STEP 3 — SELECT SERVICES")
+            all_svcs_up = sorted([s for s in df_exploded["Service"].unique() if str(s).strip() not in ["","nan"]])
+            svc_search_up = st.text_input("Filter", placeholder="Search services…", key="svc_up", label_visibility="collapsed")
+            if svc_search_up: all_svcs_up = [s for s in all_svcs_up if svc_search_up.lower() in s.lower()]
+            new_services = st.multiselect("Services in this quotation", options=all_svcs_up,
+                                           key="new_svcs", label_visibility="collapsed")
+            cat_filter_up = st.selectbox("Filter historical by category",
+                                          options=["All"]+sorted([c for c in df_master["Category"].unique()
+                                                                   if str(c).strip() not in ["","nan"]]),
+                                          key="cat_up")
+
+            section_title("STEP 4 — COMPARISON & VERDICT")
+            manual_val = st.session_state.get("manual_price_input", 0.0)
+            if new_price <= 0 and manual_val > 0: new_price = float(manual_val)
+
+            if not new_services and new_price <= 0:
+                st.info("Select services to compare.")
+            else:
+                candidates = (df_exploded[df_exploded["Service"].isin(new_services)].copy()
+                              if new_services else df_exploded.copy())
+                if cat_filter_up != "All":
+                    candidates = candidates[candidates["Category"]==cat_filter_up]
+                cand_files = (candidates.drop_duplicates(subset=["File Name","Vendor"])
+                              [["File Name","Vendor","Category","Hyperlink","Quoted Price"]].copy())
+
+                if cand_files.empty:
+                    st.warning("No historical quotes found.")
+                else:
+                    hist_prices = []; vendor_p_map = {}
+                    for _,r in cand_files.iterrows():
+                        qp = _parse_num(str(r.get("Quoted Price","")).strip())
+                        if qp > 0:
+                            hist_prices.append(qp); vendor_p_map[r["Vendor"]] = qp
+                        ck = "px_{}".format(str(r.get("File Name","")).strip())
+                        ca = st.session_state.get(ck)
+                        if ca and ca.get("price_num",0) > 0:
+                            hist_prices.append(ca["price_num"]); vendor_p_map[r["Vendor"]] = ca["price_num"]
+
+                    if new_price > 0 and hist_prices:
+                        ps,ps_lbl,avg_h,mn_h,mx_h = price_score(new_price, hist_prices)
+                        vt,vt_desc,vt_col = get_verdict(ps)
+                        vt_css = score_css(ps)
+
+                        st.markdown("<div class='verdict-{}'>"
+                                    "<div style='font-size:1.2em;margin-bottom:6px'>{}</div>"
+                                    "<div style='font-size:0.88em;font-weight:400'>{}</div>"
+                                    "</div>".format(vt_css,vt,vt_desc), unsafe_allow_html=True)
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        sc1,sc2,sc3,sc4 = st.columns(4)
+                        sc1.markdown("<div class='score-card {}'>"
+                                     "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:{}'>Price Score</div>"
+                                     "<div style='font-size:2.0em;font-weight:800;color:{}'>{}/100</div>"
+                                     "<div style='font-size:0.75em;color:#555;margin-top:4px'>vs {} historical</div>"
+                                     "</div>".format(vt_css,vt_col,vt_col,
+                                                     ps if ps is not None else "N/A", len(hist_prices)),
+                                     unsafe_allow_html=True)
+                        sc2.markdown("<div class='score-card yellow'>"
+                                     "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:#856404'>Your Price</div>"
+                                     "<div style='font-size:1.8em;font-weight:800;color:#D04A02'>{}</div>"
+                                     "</div>".format(_fmt(new_price)), unsafe_allow_html=True)
+                        sc3.markdown("<div class='score-card yellow'>"
+                                     "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:#856404'>Historical Avg</div>"
+                                     "<div style='font-size:1.8em;font-weight:800;color:#295477'>{}</div>"
+                                     "<div style='font-size:0.72em;color:#555;margin-top:4px'>min {} · max {}</div>"
+                                     "</div>".format(_fmt(avg_h),_fmt(mn_h),_fmt(mx_h)), unsafe_allow_html=True)
+                        sc4.markdown("<div class='score-card {}'>"
+                                     "<div style='font-size:0.68em;font-weight:700;text-transform:uppercase;color:{}'>vs Average</div>"
+                                     "<div style='font-size:1.1em;font-weight:800;color:{};margin-top:6px'>{}</div>"
+                                     "</div>".format(vt_css,vt_col,vt_col,ps_lbl), unsafe_allow_html=True)
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        ai_box(ai_price_insight(new_price, hist_prices, vendor_p_map))
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        section_title("PRICE POSITIONING CHART")
+                        chart_data = []
+                        for _,r in cand_files.iterrows():
+                            fn  = str(r.get("File Name","")).strip()
+                            ck  = "px_{}".format(fn)
+                            cached = st.session_state.get(ck)
+                            qp  = _parse_num(str(r.get("Quoted Price","")).strip())
+                            ep  = cached["price_num"] if cached else 0.0
+                            pval= ep if ep > 0 else qp
+                            if pval > 0:
+                                chart_data.append({"Label":"{}/{}".format(r["Vendor"],fn[:12]),
+                                                   "Price":pval,"Type":"Historical",
+                                                   "Color":vendor_color_map.get(r["Vendor"],PwC_GREY)})
+                        chart_data.append({"Label":"★ NEW: {}".format(fname_up[:15]),
+                                           "Price":new_price,"Type":"New Upload","Color":PwC_ORANGE})
+                        cdf = pd.DataFrame(chart_data).sort_values("Price")
+                        cf  = go.Figure()
+                        hist_df = cdf[cdf["Type"]=="Historical"]
+                        new_df  = cdf[cdf["Type"]=="New Upload"]
+                        if not hist_df.empty:
+                            cf.add_trace(go.Bar(x=hist_df["Label"],y=hist_df["Price"],
+                                                marker_color=hist_df["Color"],marker_line_width=0,
+                                                name="Historical",text=hist_df["Price"].apply(_fmt),
+                                                textposition="outside"))
+                        if not new_df.empty:
+                            cf.add_trace(go.Bar(x=new_df["Label"],y=new_df["Price"],
+                                                marker_color=PwC_ORANGE,marker_line_width=0,
+                                                name="Your Upload",text=new_df["Price"].apply(_fmt),
+                                                textposition="outside"))
+                        cf.add_hline(y=avg_h,line_dash="dash",line_color=PwC_YELLOW,line_width=2,
+                                      annotation_text="Avg: {}".format(_fmt(avg_h)),
+                                      annotation_position="top right")
+                        cf.update_layout(height=360,plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                          margin=dict(l=5,r=10,t=20,b=10),font=CFONT,barmode="group",
+                                          yaxis=dict(title="Price",showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                          xaxis=dict(tickangle=-25),
+                                          legend=dict(orientation="h",x=0,y=1.05),bargap=0.25)
+                        st.plotly_chart(cf, use_container_width=True)
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 4 — DATA TABLE
+# ════════════════════════════════════════════════════════════
+with tab4:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab.")
+    else:
+        dm = df_master.copy()
+        if selected_cat    != "All": dm = dm[dm["Category"]==selected_cat]
+        if selected_vendor != "All": dm = dm[dm["Vendor"]==selected_vendor]
+        st.dataframe(dm.drop(columns=["Services List","Hyperlink"], errors="ignore"),
+                     use_container_width=True, height=500)
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 5 — UPLOAD CATALOG
+# ════════════════════════════════════════════════════════════
+with tab5:
+    pwc_header("Upload Master Catalog","Upload any Excel or CSV catalog — AI auto-detects columns.")
+
+    if DATA_SOURCE == "uploaded":
+        st.success("✅ Using uploaded catalog: **{}** rows · **{}** vendors · **{}** services".format(
+            len(df_master), df_master["Vendor"].nunique(), df_exploded["Service"].nunique()))
+    if not NO_DATA and DATA_SOURCE == "file":
+        st.info("📂 Currently using: **Master Catalog.xlsx** — {} vendors · {} services · {} categories".format(
+            df_master["Vendor"].nunique(), df_exploded["Service"].nunique(), df_master["Category"].nunique()))
+
+    section_title("UPLOAD A DIFFERENT CATALOG")
+    catalog_file = st.file_uploader("Upload Master Catalog", type=["xlsx","xls","csv"],
+                                     label_visibility="collapsed", key="catalog_upload")
+    if catalog_file is not None:
+        file_bytes = catalog_file.read(); fname_cat = catalog_file.name
+        with st.spinner("AI analyzing catalog…"):
+            df_new, df_exp_new, err = process_uploaded_catalog(file_bytes, fname_cat)
+        if err: st.error("❌ {}".format(err))
+        elif df_new is None: st.error("❌ Could not process file.")
+        else:
+            st.success("✅ Detected **{}** rows · **{}** vendors · **{}** categories".format(
+                len(df_new), df_new["Vendor"].nunique(), df_new["Category"].nunique()))
+            pc1, pc2 = st.columns(2)
+            spv_new = (df_exp_new.groupby("Vendor")["Service"].nunique()
+                       .sort_values(ascending=False).reset_index())
+            spv_new.columns = ["Vendor","Services"]
+            with pc1:
+                pf1 = go.Figure(go.Bar(x=spv_new["Vendor"],y=spv_new["Services"],
+                                        marker_color=[get_color(i) for i in range(len(spv_new))],
+                                        marker_line_width=0,text=spv_new["Services"],textposition="outside"))
+                pf1.update_layout(title="Services per Vendor",height=300,plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                   margin=dict(l=5,r=10,t=40,b=10),font=CFONT,
+                                   yaxis=dict(showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                   xaxis=dict(tickangle=-30),bargap=0.35)
+                st.plotly_chart(pf1, use_container_width=True)
+            cat_new = (df_new.drop_duplicates(subset=["Category","File Name"])
+                       .groupby("Category").size().reset_index())
+            cat_new.columns = ["Category","Count"]
+            with pc2:
+                if not cat_new.empty:
+                    pf2 = px.pie(cat_new,names="Category",values="Count",hole=0.45,
+                                  color_discrete_sequence=COLORS)
+                    pf2.update_traces(textposition="outside",textinfo="label+percent",textfont_size=10)
+                    pf2.update_layout(title="Category Distribution",height=300,
+                                       margin=dict(l=10,r=10,t=40,b=10),paper_bgcolor=CBG,font=CFONT)
+                    st.plotly_chart(pf2, use_container_width=True)
+
+            st.dataframe(df_new.drop(columns=["Services List","Hyperlink"], errors="ignore").head(20),
+                         use_container_width=True, height=280)
+            if st.button("✅ Apply This Catalog to Dashboard", type="primary"):
+                st.session_state["uploaded_catalog_df"]  = df_new
+                st.session_state["uploaded_catalog_exp"] = df_exp_new
+                st.success("✅ Catalog applied! Dashboard updated."); st.rerun()
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 6 — VENDOR ANALYSIS
+# ════════════════════════════════════════════════════════════
+with tab6:
+    if NO_DATA:
+        st.info("No catalog loaded. Go to 🗂 Upload Catalog tab first.")
+    else:
+        pwc_header("Vendor Price Analysis",
+                   "Prices extracted from GitHub quote files · Cheap vs expensive analysis per service")
+
+        all_fnames = tuple(str(f).strip() for f in df_master["File Name"].unique()
+                           if str(f).strip() not in ["","nan"])
+        col_load, col_info = st.columns([2,3])
+        with col_load:
+            run_analysis = st.button("🔄 Load All Prices from GitHub", type="primary",
+                                      use_container_width=True, key="run_gh_analysis")
+        with col_info:
+            st.markdown("<div style='background:#FFF3F0;border:1px solid #D04A02;border-radius:4px;"
+                        "padding:8px 14px;font-size:0.83em'>📁 Reads <b>{}</b> quote files from GitHub. "
+                        "Uses <b>Quoted Price</b> from catalog as fallback.</div>".format(len(all_fnames)),
+                        unsafe_allow_html=True)
+
+        if run_analysis:
+            st.session_state["gh_prices_loaded"] = True
+            load_all_prices_from_github.clear(); load_price_from_github.clear()
+
+        if st.session_state.get("gh_prices_loaded", False):
+            with st.spinner("Loading prices from GitHub…"):
+                gh_prices = load_all_prices_from_github(all_fnames)
+
+            rows = []
+            for _, r in df_master.iterrows():
+                fname   = str(r.get("File Name","")).strip()
+                price, source = get_price_for_row(r, gh_prices)
+                gh_info = gh_prices.get(fname,{})
+                rows.append({"Vendor":r["Vendor"],"Category":r["Category"],"File Name":fname,
+                              "Quoted Price":_parse_num(str(r.get("Quoted Price",""))),
+                              "Extracted Price":gh_info.get("price_num",0.0),
+                              "Best Price":price,"Source":source,
+                              "Status":gh_info.get("status","—"),"Services":r.get("Comments","")})
+            df_analysis = pd.DataFrame(rows)
+            df_analysis = df_analysis[df_analysis["Best Price"]>0]
+
+            if df_analysis.empty:
+                st.warning("No prices found. Check that files exist in demo_quotes/ on GitHub.")
+            else:
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("PRICE EXTRACTION SUMMARY")
+                k1,k2,k3,k4 = st.columns(4)
+                extracted = df_analysis[df_analysis["Source"]=="extracted"]
+                from_cat  = df_analysis[df_analysis["Source"]=="catalog"]
+                kpi(k1, len(df_analysis),    "Files with Prices",     PwC_ORANGE)
+                kpi(k2, len(extracted),       "Extracted from Files",  PwC_BLUE)
+                kpi(k3, len(from_cat),        "From Catalog",          PwC_TEAL)
+                kpi(k4, _fmt(df_analysis["Best Price"].mean()), "Avg Quote Value", PwC_DARK)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                static_section_header("📋 Extraction Status per File", PwC_TEAL)
+                with st.container():
+                    status_rows = ["<table class='comp-table'><thead><tr>"
+                                   "<th>File Name</th><th>Vendor</th><th>Quoted Price</th>"
+                                   "<th>Extracted Price</th><th>Used Price</th><th>Source</th>"
+                                   "<th>Status</th></tr></thead><tbody>"]
+                    for i,r in df_analysis.iterrows():
+                        bg = "white" if i%2==0 else "#F3F3F3"
+                        vc = vendor_color_map.get(r["Vendor"],PwC_GREY)
+                        sc = PwC_GREEN if r["Source"]=="extracted" else PwC_YELLOW
+                        status_rows.append(
+                            "<tr style='background:{}'>"
+                            "<td style='font-family:monospace;font-size:0.78em'>{}</td>"
+                            "<td>{}</td>"
+                            "<td style='font-family:monospace'>{}</td>"
+                            "<td style='font-family:monospace;color:#295477'>{}</td>"
+                            "<td style='font-family:monospace;font-weight:700;color:#D04A02'>{}</td>"
+                            "<td style='color:{};font-weight:700;font-size:0.80em'>{}</td>"
+                            "<td style='font-size:0.80em'>{}</td></tr>".format(
+                                bg, r["File Name"], vendor_pill(r["Vendor"],vc),
+                                _fmt(r["Quoted Price"]) if r["Quoted Price"]>0 else "—",
+                                _fmt(r["Extracted Price"]) if r["Extracted Price"]>0 else "—",
+                                _fmt(r["Best Price"]), sc, r["Source"].upper(), r["Status"]))
+                    status_rows.append("</tbody></table>")
+                    st.markdown("".join(status_rows), unsafe_allow_html=True)
+
+                # Per-service analysis
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("PER-SERVICE VENDOR ANALYSIS",
+                               "For each service: which vendor was cheapest and most expensive.")
+                df_svc_analysis = []
+                for _, r in df_analysis.iterrows():
+                    svcs_raw = str(r["Services"]).replace("\\n","\n").replace("\r\n","\n").replace("\r","\n")
+                    svcs = [s.strip() for s in svcs_raw.split("\n") if s.strip() and s.strip() not in ["nan","None",""]]
+                    if not svcs: svcs = [svcs_raw.strip()]
+                    for svc in svcs:
+                        df_svc_analysis.append({"Service":svc,"Vendor":r["Vendor"],"Category":r["Category"],
+                                                 "Price":r["Best Price"],"File":r["File Name"],"Source":r["Source"]})
+                df_svc_df = pd.DataFrame(df_svc_analysis)
+                svc_vendor_counts  = df_svc_df.groupby("Service")["Vendor"].nunique()
+                multi_vendor_svcs  = svc_vendor_counts[svc_vendor_counts>1].index.tolist()
+                single_vendor_svcs = svc_vendor_counts[svc_vendor_counts==1].index.tolist()
+
+                if multi_vendor_svcs:
+                    st.markdown("<div style='background:#F0FFF4;border-left:4px solid #22992E;padding:8px 14px;"
+                                "border-radius:2px;margin-bottom:12px;font-size:0.87em'>"
+                                "✅ <b>{} service(s)</b> quoted by multiple vendors — full price comparison available."
+                                "</div>".format(len(multi_vendor_svcs)), unsafe_allow_html=True)
+
+                    for svc in sorted(multi_vendor_svcs):
+                        d_svc = df_svc_df[df_svc_df["Service"]==svc].sort_values("Price")
+                        min_p = d_svc["Price"].min(); max_p = d_svc["Price"].max()
+                        avg_p = d_svc["Price"].mean()
+                        spread= round((max_p-min_p)/min_p*100,1) if min_p>0 else 0
+                        best_v = d_svc.loc[d_svc["Price"].idxmin(),"Vendor"]
+                        worst_v= d_svc.loc[d_svc["Price"].idxmax(),"Vendor"]
+
+                        static_section_header(
+                            "{}  ·  {} vendors  ·  spread {}%  ·  best: {} @ {}".format(
+                                svc, d_svc["Vendor"].nunique(), spread, best_v, _fmt(min_p)))
+                        with st.container():
+                            sc1,sc2,sc3 = st.columns(3)
+                            sc1.markdown("<div class='score-card green'><div style='font-size:0.68em;font-weight:700;"
+                                         "text-transform:uppercase;color:#22992E'>Cheapest</div>"
+                                         "<div style='font-size:1.6em;font-weight:800;color:#22992E'>{}</div>"
+                                         "<div style='font-size:0.78em;color:#555'>{}</div></div>".format(_fmt(min_p),best_v),
+                                         unsafe_allow_html=True)
+                            sc2.markdown("<div class='score-card yellow'><div style='font-size:0.68em;font-weight:700;"
+                                         "text-transform:uppercase;color:#856404'>Average</div>"
+                                         "<div style='font-size:1.6em;font-weight:800;color:#856404'>{}</div>"
+                                         "<div style='font-size:0.78em;color:#555'>{} vendors</div></div>".format(
+                                             _fmt(avg_p), d_svc["Vendor"].nunique()), unsafe_allow_html=True)
+                            sc3.markdown("<div class='score-card red'><div style='font-size:0.68em;font-weight:700;"
+                                         "text-transform:uppercase;color:#E0301E'>Most Expensive</div>"
+                                         "<div style='font-size:1.6em;font-weight:800;color:#E0301E'>{}</div>"
+                                         "<div style='font-size:0.78em;color:#555'>{}</div></div>".format(_fmt(max_p),worst_v),
+                                         unsafe_allow_html=True)
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                            all_p = d_svc["Price"].tolist()
+                            tbl   = ["<table class='comp-table'><thead><tr><th>Vendor</th><th>Price</th>"
+                                     "<th>vs Average</th><th>Price Score</th><th>Verdict</th><th>Source</th>"
+                                     "</tr></thead><tbody>"]
+                            for j,(_,vr) in enumerate(d_svc.iterrows()):
+                                bg  = "white" if j%2==0 else "#F3F3F3"
+                                vc  = vendor_color_map.get(vr["Vendor"],PwC_GREY)
+                                p   = vr["Price"]
+                                others = [x for x in all_p if x!=p]
+                                ps  = None
+                                if p>0 and others: ps,_,_,_,_ = price_score(p,others)
+                                sc_col = score_color(ps); vt,_,vt_col = get_verdict(ps)
+                                pct = round((p-avg_p)/avg_p*100,1) if avg_p>0 else 0
+                                pct_col = PwC_GREEN if pct<0 else PwC_RED if pct>5 else "#856404"
+                                pct_txt = ("{}% below avg".format(abs(pct)) if pct<0
+                                           else "{}% above avg".format(abs(pct)) if pct>0 else "At average")
+                                src_badge = ("<span style='background:#22992E;color:white;padding:2px 6px;"
+                                             "border-radius:2px;font-size:0.72em;font-weight:700'>EXTRACTED</span>"
+                                             if vr["Source"]=="extracted" else
+                                             "<span style='background:#FFB600;color:white;padding:2px 6px;"
+                                             "border-radius:2px;font-size:0.72em;font-weight:700'>CATALOG</span>")
+                                tbl.append("<tr style='background:{}'><td>{}</td>"
+                                           "<td style='font-family:monospace;font-weight:700'>{}</td>"
+                                           "<td style='color:{}'>{}</td>"
+                                           "<td style='text-align:center'><span style='font-weight:800;font-size:1.1em;color:{}'>{}/100</span></td>"
+                                           "<td><span style='color:{};font-weight:700;font-size:0.85em'>{}</span></td>"
+                                           "<td>{}</td></tr>".format(
+                                               bg, vendor_pill(vr["Vendor"],vc), _fmt(p),
+                                               pct_col, pct_txt, sc_col,
+                                               ps if ps is not None else "—",
+                                               vt_col, vt, src_badge))
+                            tbl.append("</tbody></table>")
+                            st.markdown("".join(tbl), unsafe_allow_html=True)
+
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            fig_svc = go.Figure(go.Bar(
+                                x=d_svc["Vendor"], y=d_svc["Price"],
+                                marker_color=[vendor_color_map.get(v,PwC_GREY) for v in d_svc["Vendor"]],
+                                marker_line_width=0, text=d_svc["Price"].apply(_fmt), textposition="outside"))
+                            fig_svc.add_hline(y=avg_p,line_dash="dash",line_color=PwC_YELLOW,line_width=2,
+                                               annotation_text="Avg: {}".format(_fmt(avg_p)),
+                                               annotation_position="top right")
+                            fig_svc.update_layout(height=280,plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                                   margin=dict(l=5,r=10,t=20,b=10),font=CFONT,
+                                                   yaxis=dict(title="Price (USD)",showgrid=True,
+                                                              gridcolor="#E0E0E0",zeroline=False),
+                                                   xaxis=dict(tickangle=-15),bargap=0.4)
+                            st.plotly_chart(fig_svc, use_container_width=True)
+
+                # Vendor overview
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("VENDOR OVERVIEW — TOTAL SPEND")
+                vendor_totals = (df_analysis.groupby("Vendor")["Best Price"]
+                                 .agg(["sum","mean","count"]).reset_index())
+                vendor_totals.columns = ["Vendor","Total","Average","Quotes"]
+                vendor_totals = vendor_totals.sort_values("Total", ascending=False)
+                overall_avg   = df_analysis["Best Price"].mean()
+
+                vt1,vt2 = st.columns(2)
+                with vt1:
+                    fig_tot = go.Figure(go.Bar(
+                        x=vendor_totals["Vendor"], y=vendor_totals["Total"],
+                        marker_color=[vendor_color_map.get(v,PwC_GREY) for v in vendor_totals["Vendor"]],
+                        marker_line_width=0, text=vendor_totals["Total"].apply(_fmt), textposition="outside"))
+                    fig_tot.update_layout(title="Total Quoted Value per Vendor",height=350,
+                                           plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                           margin=dict(l=5,r=10,t=40,b=10),font=CFONT,
+                                           yaxis=dict(showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                           xaxis=dict(tickangle=-30),bargap=0.35)
+                    st.plotly_chart(fig_tot, use_container_width=True)
+                with vt2:
+                    fig_avg = go.Figure(go.Bar(
+                        x=vendor_totals["Vendor"], y=vendor_totals["Average"],
+                        marker_color=[vendor_color_map.get(v,PwC_GREY) for v in vendor_totals["Vendor"]],
+                        marker_line_width=0, text=vendor_totals["Average"].apply(_fmt), textposition="outside"))
+                    fig_avg.add_hline(y=overall_avg,line_dash="dash",line_color=PwC_YELLOW,line_width=2,
+                                       annotation_text="Overall Avg: {}".format(_fmt(overall_avg)),
+                                       annotation_position="top right")
+                    fig_avg.update_layout(title="Average Quote Value per Vendor",height=350,
+                                           plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                           margin=dict(l=5,r=10,t=40,b=10),font=CFONT,
+                                           yaxis=dict(showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                           xaxis=dict(tickangle=-30),bargap=0.35)
+                    st.plotly_chart(fig_avg, use_container_width=True)
+
+                # Download
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_title("FULL ANALYSIS DATA")
+                display_cols = ["Vendor","Category","File Name","Best Price","Source"]
+                st.dataframe(df_analysis[display_cols].sort_values(["Category","Best Price"]),
+                             use_container_width=True, height=320)
+                st.download_button(label="📥 Download Full Analysis CSV",
+                                    data=df_analysis[display_cols].to_csv(index=False),
+                                    file_name="vendor_analysis.csv", mime="text/csv", type="primary")
+        else:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div style='background:white;border:1px solid #e0e0e0;border-radius:4px;"
+                        "padding:24px 28px;text-align:center;margin-top:20px'>"
+                        "<div style='font-size:2em;margin-bottom:12px'>🔍</div>"
+                        "<div style='font-size:1.1em;font-weight:700;color:#2D2D2D;margin-bottom:8px'>"
+                        "Click the button above to start analysis</div>"
+                        "<div style='font-size:0.85em;color:#7D7D7D;max-width:500px;margin:0 auto'>"
+                        "Fetches all <b>{}</b> quote files from GitHub and extracts prices automatically."
+                        "</div></div>".format(len(all_fnames)), unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════
+# TAB 7 — REAL CATALOG ANALYSIS
+# ════════════════════════════════════════════════════════════
+with tab7:
+    pwc_header("Real Quotation Analysis",
+               "Upload Master Catalog → follows File Links → downloads quote files → extracts prices → full analysis")
+
+    section_title("STEP 1 — UPLOAD YOUR MASTER CATALOG EXCEL")
+    st.markdown("<div style='background:#EEF4FF;border-left:4px solid #295477;padding:10px 14px;"
+                "border-radius:2px;margin-bottom:12px;font-size:0.84em'>"
+                "📋 Your Excel must have: <b>Category</b> · <b>Vendor</b> · <b>File Name</b> · "
+                "<b>Quoted Price</b> · <b>Comments</b> · <b>File Link</b> (URL to each quote file)"
+                "</div>", unsafe_allow_html=True)
+
+    uploaded_real = st.file_uploader("Upload Master Catalog", type=["xlsx","xls","csv"],
+                                      key="tab7_real_upload", label_visibility="collapsed")
+
+    if uploaded_real is None:
+        if not NO_DATA and not df_master.empty:
+            use_real_cat = st.checkbox("Use currently loaded catalog ({} files)".format(len(df_master)),
+                                        key="use_current_for_real")
+            if use_real_cat:
+                df_real_cat = df_master.copy()
+                st.success("Using current catalog — **{}** vendors · **{}** files".format(
+                    df_real_cat["Vendor"].nunique(), len(df_real_cat)))
+            else:
+                st.info("👆 Upload your Master Catalog Excel to start analysis."); st.stop()
+        else:
+            st.info("👆 Upload your Master Catalog Excel to start analysis."); st.stop()
+    else:
+        real_bytes = uploaded_real.read()
+        df_real_cat, _, real_err = process_uploaded_catalog(real_bytes, uploaded_real.name)
+        if real_err or df_real_cat is None:
+            st.error("❌ Could not read: {}".format(real_err)); st.stop()
+        link_col_found = any(c.lower().strip() in ["file link","file url","url","hyperlink","link"]
+                             for c in df_real_cat.columns)
+        if not link_col_found:
+            st.warning("⚠️ No 'File Link' column found. Quoted Price from catalog will be used.")
+        st.success("✅ Catalog loaded: **{}** vendors · **{}** files · **{}** categories".format(
+            df_real_cat["Vendor"].nunique(), len(df_real_cat), df_real_cat["Category"].nunique()))
+        with st.expander("Preview catalog data", expanded=False):
+            st.dataframe(df_real_cat.drop(columns=["Services List","Hyperlink"], errors="ignore"),
+                         use_container_width=True, height=200)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("STEP 2 — RUN ANALYSIS")
+    run_real = st.button("🚀 Run Full Analysis", type="primary", key="run_real_analysis")
+
+    if run_real:
+        st.session_state["real_analysis_done"] = False
+        st.session_state["real_analysis_df"]   = None
+
+    if run_real or st.session_state.get("real_analysis_done", False):
+        if run_real:
+            with st.spinner("Analyzing {} quote files…".format(len(df_real_cat))):
+                df_result = analyze_real_catalog(df_real_cat)
+            st.session_state["real_analysis_done"] = True
+            st.session_state["real_analysis_df"]   = df_result.to_dict("records")
+        else:
+            df_result = pd.DataFrame(st.session_state["real_analysis_df"])
+
+        df_priced   = df_result[df_result["Best Price"]>0].copy()
+        df_no_price = df_result[df_result["Best Price"]<=0].copy()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        k1,k2,k3,k4,k5 = st.columns(5)
+        kpi(k1, len(df_result),                    "Total Files",   PwC_ORANGE)
+        kpi(k2, len(df_priced),                    "Prices Found",  PwC_GREEN)
+        kpi(k3, len(df_no_price),                  "No Price",      PwC_GREY)
+        kpi(k4, df_result["Vendor"].nunique(),      "Vendors",       PwC_BLUE)
+        kpi(k5, _fmt(df_priced["Best Price"].mean()) if not df_priced.empty else "—",
+            "Avg Quote", PwC_TEAL)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        static_section_header("📋 File Extraction Status", PwC_TEAL)
+        with st.container():
+            s_rows = ["<table class='comp-table'><thead><tr><th>File Name</th><th>Vendor</th>"
+                      "<th>Quoted Price</th><th>Extracted Price</th><th>Used Price</th>"
+                      "<th>Source</th><th>Status</th></tr></thead><tbody>"]
+            for i,r in df_result.iterrows():
+                bg = "white" if i%2==0 else "#F3F3F3"
+                vc = vendor_color_map.get(r["Vendor"],PwC_GREY)
+                sc = PwC_GREEN if r["Source"]=="extracted" else PwC_YELLOW if r["Source"]=="catalog" else "#bbb"
+                s_rows.append("<tr style='background:{}'>"
+                              "<td style='font-family:monospace;font-size:0.78em'>{}</td>"
+                              "<td>{}</td>"
+                              "<td style='font-family:monospace'>{}</td>"
+                              "<td style='font-family:monospace;color:#295477'>{}</td>"
+                              "<td style='font-family:monospace;font-weight:700;color:#D04A02'>{}</td>"
+                              "<td><span style='background:{};color:white;padding:2px 6px;border-radius:2px;"
+                              "font-size:0.72em;font-weight:700'>{}</span></td>"
+                              "<td style='font-size:0.80em'>{}</td></tr>".format(
+                                  bg, r["File Name"], vendor_pill(r["Vendor"],vc),
+                                  _fmt(r["Quoted Price"]) if r["Quoted Price"]>0 else "—",
+                                  _fmt(r["Extracted Price"]) if r["Extracted Price"]>0 else "—",
+                                  _fmt(r["Best Price"]) if r["Best Price"]>0 else "—",
+                                  sc, r["Source"].upper(), r["Status"]))
+            s_rows.append("</tbody></table>")
+            st.markdown("".join(s_rows), unsafe_allow_html=True)
+
+        if df_priced.empty:
+            st.warning("No prices found. Check that File Link URLs are publicly accessible."); st.stop()
+
+        # Vendor ranking
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("VENDOR PRICE ANALYSIS", "Cheapest to most expensive — ranked by average quote.")
+        v_sum = (df_priced.groupby("Vendor")["Best Price"]
+                 .agg(["mean","sum","min","max","count"]).reset_index())
+        v_sum.columns = ["Vendor","Average","Total","Min","Max","Quotes"]
+        v_sum = v_sum.sort_values("Average")
+        ov_avg = df_priced["Best Price"].mean()
+
+        vt_tbl = ["<table class='comp-table'><thead><tr><th>Rank</th><th>Vendor</th>"
+                  "<th>Quotes</th><th>Avg Quote</th><th>Min</th><th>Max</th>"
+                  "<th>vs Average</th><th>Verdict</th></tr></thead><tbody>"]
+        for rank,(i,vr) in enumerate(v_sum.iterrows(), start=1):
+            bg  = "white" if rank%2==0 else "#F3F3F3"
+            vc  = vendor_color_map.get(vr["Vendor"],PwC_GREY)
+            pct = round((vr["Average"]-ov_avg)/ov_avg*100,1) if ov_avg>0 else 0
+            pc  = PwC_GREEN if pct<-5 else PwC_RED if pct>5 else "#856404"
+            pt  = ("{}% below".format(abs(pct)) if pct<0 else "{}% above".format(abs(pct)) if pct>0 else "At avg")
+            ov  = ("✅ COMPETITIVE",PwC_GREEN) if pct<-10 else ("🔴 EXPENSIVE",PwC_RED) if pct>10 else ("🟡 AVERAGE","#856404")
+            medal = "🥇" if rank==1 else "🥈" if rank==2 else "🥉" if rank==3 else str(rank)
+            vt_tbl.append("<tr style='background:{}'>"
+                          "<td style='text-align:center;font-size:1.1em'>{}</td><td>{}</td>"
+                          "<td style='text-align:center;font-weight:700'>{}</td>"
+                          "<td style='font-family:monospace;font-weight:700'>{}</td>"
+                          "<td style='font-family:monospace;color:#22992E'>{}</td>"
+                          "<td style='font-family:monospace;color:#E0301E'>{}</td>"
+                          "<td style='color:{}'>{}</td>"
+                          "<td style='color:{};font-weight:700;font-size:0.85em'>{}</td>"
+                          "</tr>".format(bg, medal, vendor_pill(vr["Vendor"],vc),
+                                         int(vr["Quotes"]), _fmt(vr["Average"]),
+                                         _fmt(vr["Min"]), _fmt(vr["Max"]),
+                                         pc, pt, ov[1], ov[0]))
+        vt_tbl.append("</tbody></table>")
+        st.markdown("".join(vt_tbl), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        ch1,ch2 = st.columns(2)
+        with ch1:
+            fig_a = go.Figure(go.Bar(
+                x=v_sum["Vendor"], y=v_sum["Average"],
+                marker_color=[vendor_color_map.get(v,PwC_GREY) for v in v_sum["Vendor"]],
+                marker_line_width=0, text=v_sum["Average"].apply(_fmt), textposition="outside"))
+            fig_a.add_hline(y=ov_avg,line_dash="dash",line_color=PwC_YELLOW,line_width=2,
+                             annotation_text="Avg:{}".format(_fmt(ov_avg)), annotation_position="top right")
+            fig_a.update_layout(title="Average Quote per Vendor",height=340,
+                                  plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                  margin=dict(l=5,r=10,t=40,b=10),font=CFONT,
+                                  yaxis=dict(showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                  xaxis=dict(tickangle=-25),bargap=0.35)
+            st.plotly_chart(fig_a, use_container_width=True)
+        with ch2:
+            fig_t = go.Figure(go.Bar(
+                x=v_sum["Vendor"], y=v_sum["Total"],
+                marker_color=[vendor_color_map.get(v,PwC_GREY) for v in v_sum["Vendor"]],
+                marker_line_width=0, text=v_sum["Total"].apply(_fmt), textposition="outside"))
+            fig_t.update_layout(title="Total Quoted Value per Vendor",height=340,
+                                  plot_bgcolor=CBG,paper_bgcolor=CBG,
+                                  margin=dict(l=5,r=10,t=40,b=10),font=CFONT,
+                                  yaxis=dict(showgrid=True,gridcolor="#E0E0E0",zeroline=False),
+                                  xaxis=dict(tickangle=-25),bargap=0.35)
+            st.plotly_chart(fig_t, use_container_width=True)
+
+        # Download
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("DOWNLOAD ANALYSIS")
+        dl = df_priced[["Vendor","Category","File Name","Quoted Price","Extracted Price",
+                         "Best Price","Source","Status"]].sort_values(["Category","Best Price"])
+        st.download_button(label="📥 Download Analysis CSV", data=dl.to_csv(index=False),
+                            file_name="real_quotes_analysis.csv", mime="text/csv", type="primary")
