@@ -1116,18 +1116,11 @@ def process_uploaded_catalog(file_bytes, filename):
 
         df["Services List"] = df["Comments"].apply(
             parse_svc)
-        df_exp = df.explode("Services List").copy()
 
-        df_exp.rename(
-            columns={"Services List": "Service"},
-            inplace=True)
-        df_exp["Service"] = df_exp["Service"].apply(
-                lambda x: str(x).strip())
-            df_exp = df_exp[
-                ~df_exp["Service"].isin(
-                    ["", "(unspecified)",
-                     "nan", "None"])
-            ].reset_index(drop=True)
+        df_exp = df.explode("Services List").copy()
+        df_exp.rename(columns={"Services List": "Service"}, inplace=True)
+        df_exp["Service"] = df_exp["Service"].apply(lambda x: str(x).strip())
+        df_exp = df_exp[~df_exp["Service"].isin(["", "(unspecified)", "nan", "None"])].reset_index(drop=True)
         return df, df_exp, None
     except Exception as e:
         return None, None, str(e)
