@@ -1646,4 +1646,1111 @@ def render_browse_verdict(df_master, df_exploded,
                         pct=round((p-avg_p)/avg_p*100,1) \
                             if avg_p>0 else 0
                         vs=("{}% below ✅".format(abs(pct))
+                            if pct<0
+                             else "{}% above ⚠️".format(abs(pct))
+                             if pct>0 else "At average")
+                        vc2=(C_ORANGE if pct<0
+                              else C_DARK if pct>10
+                              else C_GREY_DARK)
+                        vt,_,_=get_verdict(ps)
+                        medal=("🥇" if rank==1
+                                else "🥈" if rank==2
+                                else "🥉" if rank==3
+                                else str(rank))
+                        tbl.append(
+                            "<tr style='background:{}'>"
+                            "<td style='text-align:center;"
+                            "font-size:1.05em'>{}</td>"
+                            "<td>{}</td>"
+                            "<td style='font-family:monospace;"
+                            "font-weight:700'>{}</td>"
+                            "<td style='color:{}'>{}</td>"
+                            "<td style='text-align:center'>"
+                            "<span style='font-weight:800;"
+                            "font-size:1.1em;color:{}'>"
+                            "{}</span></td>"
+                            "<td style='font-weight:700;"
+                            "color:{}'>{}</td>"
+                            "</tr>".format(
+                                bg,medal,vpill(v,vc),
+                                _fmt(p),vc2,vs,sc,
+                                ps if ps is not None else "—",
+                                sc,vt))
+                    tbl.append("</tbody></table>")
+                    st.markdown("".join(tbl),
+                                 unsafe_allow_html=True)
+
+                    pct_b=round(
+                        (avg_p-min(vpm.values()))
+                        /avg_p*100,1) if avg_p>0 else 0
+                    insight(
+                        "<b>{}</b> is most competitive "
+                        "at <b>{}</b> — "
+                        "<b>{}% below</b> market avg. "
+                        "Spread <b>{}%</b> → <b>{}</b>.".format(
+                            best_v,
+                            _fmt(min(vpm.values())),
+                            pct_b,spread,
+                            "strong negotiation potential"
+                            if spread>20
+                            else "moderate room"
+                            if spread>10
+                            else "competitive market"))
+
+                elif not has_prices:
+                    # Master catalog — no prices
+                    st.markdown(
+                        "<div class='insight-box'>"
+                        "ℹ️ Price data is not available "
+                        "for the Master Catalog — "
+                        "quotation files are stored on "
+                        "SharePoint. Switch to the "
+                        "<b>Dummy Data</b> tabs to see "
+                        "full price analysis."
+                        "</div>",
+                        unsafe_allow_html=True)
+
+                # File detail table
+                st.markdown("<br>",unsafe_allow_html=True)
+                sec("QUOTATION FILE DETAILS")
+                has_price_col=(
+                    "Quoted Price" in d_sel.columns)
+                for svc in selected_svcs:
+                    d_svc=(d_sel[d_sel["Service"]==svc]
+                           .drop_duplicates(
+                               subset=["Vendor","File Name"])
+                           .sort_values("Vendor"))
+                    nv2=d_svc["Vendor"].nunique()
+                    st.markdown(
+                        "<div style='background:white;"
+                        "border-left:4px solid {};"
+                        "padding:10px 14px;"
+                        "border-radius:2px;margin:8px 0;"
+                        "font-weight:700;"
+                        "font-size:0.88em'>"
+                        "{}  ·  {} vendor(s)  ·  {}"
+                        "</div>".format(
+                            C_ORANGE if nv2>1
+                            else C_GREY_DARK,
+                            svc,nv2,
+                            "✅ COMPETITIVE"
+                            if nv2>1
+                            else "⚠️ SINGLE VENDOR"),
+                        unsafe_allow_html=True)
+
+                    all_p2=[]
+                    for _,r in d_svc.iterrows():
+                        qp=_parse_num(str(r.get(
+                            "Quoted Price","")).strip())
+                        if qp>0: all_p2.append(qp)
+
+                    rt=["<table class='comp-table'>"
+                        "<thead><tr>"
+                        "<th>Vendor</th><th>File</th>"]
+                    if has_price_col:
+                        rt.append("<th>Quoted Price</th>")
+                    rt.append(
+                        "<th>Score</th><th>Verdict</th>"
+                        "<th>Open</th>"
+                        "</tr></thead><tbody>")
+
+                    for i,(_,row) in enumerate(
+                            d_svc.iterrows()):
+                        bg2=("white" if i%2==0
+                              else "#F8F8F8")
+                        vc3=vcmap.get(row["Vendor"],C_DARK)
+                        fname=str(row.get(
+                            "File Name","")).strip()
+                        url=resolve_url(row)
+                        qpn=_parse_num(str(row.get(
+                            "Quoted Price","")).strip())
+                        ck2="px_{}_{}".format(
+                            chat_key,fname)
+                        ca=st.session_state.get(ck2)
+                        ref=(ca["price_num"]
+                              if ca and ca.get(
+                                  "price_num",0)>0
+                              else qpn
+                              if qpn>0 else 0)
+                        oth=[p for p in all_p2
+                             if p!=ref]
+                        ps2=None; vt2="—"
+                        vc4=C_GREY_DARK
+                        if ref>0 and oth:
+                            ps2,_,_,_,_=price_score(
+                                ref,oth)
+                            vt2,_,vc4=get_verdict(ps2)
+                        sc2=score_color(ps2)
+                        lnk=("<a href='{}' "
+                              "target='_blank' "
+                              "style='color:#D04A02;"
+                              "font-weight:600;"
+                              "text-decoration:none'>"
+                              "📂 Open</a>".format(url)
+                              if url else "—")
+                        rt.append(
+                            "<tr style='background:{}'>"
+                            "<td>{}</td>"
+                            "<td style='font-family:"
+                            "monospace;font-size:0.77em;"
+                            "word-break:break-all'>"
+                            "{}</td>".format(
+                                bg2,
+                                vpill(row["Vendor"],vc3),
+                                fname))
+                        if has_price_col:
+                            rt.append(
+                                "<td style='font-family:"
+                                "monospace;font-weight:700;"
+                                "color:#D04A02'>{}</td>"
+                                .format(_fmt(qpn)
+                                        if qpn>0
+                                        else "—"))
+                        rt.append(
+                            "<td style='text-align:"
+                            "center'>"
+                            "<span style='font-weight:"
+                            "800;color:{}'>{}</span>"
+                            "</td>"
+                            "<td style='font-weight:700;"
+                            "color:{}'>{}</td>"
+                            "<td>{}</td>"
+                            "</tr>".format(
+                                sc2,
+                                "{}/100".format(ps2)
+                                if ps2 is not None
+                                else "—",
+                                vc4,vt2,lnk))
+                    rt.append("</tbody></table>")
+                    st.markdown("".join(rt),
+                                 unsafe_allow_html=True)
+
+                    # Extract prices button
+                    # (only shown for dummy data or
+                    #  if local files exist)
+                    if has_prices or os.path.exists(
+                            DEMO_DIR):
+                        st.markdown("<br>",
+                                     unsafe_allow_html=True)
+                        if st.button(
+                                "🔍 Extract Prices — "
+                                "{}".format(svc[:38]),
+                                key="ep_{}_{}".format(
+                                    chat_key,svc[:28]),
+                                type="primary"):
+                            prog=st.progress(0)
+                            nn=len(d_svc)
+                            for ki,(_,r2) in enumerate(
+                                    d_svc.iterrows()):
+                                f2=str(r2.get(
+                                    "File Name","")).strip()
+                                ck3="px_{}_{}".format(
+                                    chat_key,f2)
+                                if not st.session_state.get(ck3):
+                                    loc=os.path.join(DEMO_DIR,f2)
+                                    if os.path.exists(loc):
+                                        st.session_state[ck3]=(
+                                            extract_price_from_file(loc))
+                                    else:
+                                        u2=resolve_url(r2)
+                                        if (u2
+                                                and u2.startswith("http")
+                                                and REQUESTS_OK):
+                                            try:
+                                                rr=requests.get(
+                                                    u2,timeout=20)
+                                                ee=u2.split("?"
+                                                            )[0].rsplit(
+                                                    ".",1)[-1].lower()
+                                                st.session_state[ck3]=(
+                                                    extract_price_from_bytes(
+                                                        rr.content,ee))
+                                            except: pass
+                                prog.progress((ki+1)/nn)
+                            prog.empty()
+                            st.rerun()
+
+
+# ════════════════════════════════════════════════════════════
+# SESSION STATE
+# ════════════════════════════════════════════════════════════
+for k,v in [
+    ("tab2_upload_price",0.0),
+    ("tab2_upload_fname",""),
+    ("tab2_file_bytes",None),
+    ("tab2_file_ext",""),
+    ("chat_redirect_upload",False),
+    ("gh_prices_loaded",False),
+    ("real_analysis_done",False),
+    ("real_analysis_df",None),
+]:
+    if k not in st.session_state:
+        st.session_state[k]=v
+
+# ════════════════════════════════════════════════════════════
+# LOAD BOTH DATA SOURCES
+# ════════════════════════════════════════════════════════════
+df_master, df_exp_master = load_master_catalog()
+df_dummy,  df_exp_dummy  = load_dummy_data()
+
+NO_MASTER = (df_master is None or df_master.empty)
+NO_DUMMY  = (df_dummy  is None or df_dummy.empty)
+
+# Build vendor colour maps
+vcmap_master={}
+vcmap_dummy={}
+if not NO_MASTER:
+    for i,v in enumerate(
+            sorted(df_master["Vendor"].unique())):
+        vcmap_master[v]=CHART_SEQ[i%len(CHART_SEQ)]
+if not NO_DUMMY:
+    for i,v in enumerate(
+            sorted(df_dummy["Vendor"].unique())):
+        vcmap_dummy[v]=CHART_SEQ[i%len(CHART_SEQ)]
+
+# For backward compat
+vendor_color_map=vcmap_master if not NO_MASTER else vcmap_dummy
+
+# ════════════════════════════════════════════════════════════
+# MAIN HEADER
+# ════════════════════════════════════════════════════════════
+st.markdown(
+    "<div style='background:#2D2D2D;color:white;"
+    "padding:24px 32px;border-radius:4px;"
+    "border-left:8px solid #D04A02;"
+    "margin-bottom:20px'>"
+    "<div style='font-size:0.68em;font-weight:700;"
+    "letter-spacing:2.5px;text-transform:uppercase;"
+    "color:#D04A02;margin-bottom:8px'>"
+    "IT PROCUREMENT · INTELLIGENCE DASHBOARD</div>"
+    "<h1 style='margin:0;font-size:1.85em;"
+    "font-weight:700;color:white;"
+    "font-family:Georgia,serif'>"
+    "Procurement Intelligence Dashboard</h1>"
+    "<p style='margin:8px 0 0;opacity:0.5;"
+    "font-size:0.85em'>"
+    "Master Catalog (Excel) · Dummy Data (CSV) · "
+    "Browse &amp; Verdict · Upload &amp; Score · "
+    "Vendor Analysis</p>"
+    "</div>",
+    unsafe_allow_html=True)
+
+# Global KPIs — show both sources
+col_m, col_d = st.columns(2, gap="large")
+with col_m:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📁 MASTER CATALOG (Excel)"
+        "</div>",
+        unsafe_allow_html=True)
+    if not NO_MASTER:
+        km1,km2,km3,km4=st.columns(4)
+        kpi_box(km1,df_master["File Name"].nunique(),
+                "Quotes",C_ORANGE)
+        kpi_box(km2,df_exp_master["Service"].nunique(),
+                "Services",C_DARK)
+        kpi_box(km3,df_master["Vendor"].nunique(),
+                "Vendors",C_MID)
+        kpi_box(km4,df_master["Category"].nunique(),
+                "Categories",C_GREY_DARK)
+    else:
+        st.warning("Master Catalog.xlsx not found.")
+
+with col_d:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📊 DUMMY DATA (CSV — with prices)"
+        "</div>",
+        unsafe_allow_html=True)
+    if not NO_DUMMY:
+        kd1,kd2,kd3,kd4=st.columns(4)
+        kpi_box(kd1,df_dummy["File Name"].nunique(),
+                "Quotes",C_ORANGE)
+        kpi_box(kd2,df_exp_dummy["Service"].nunique(),
+                "Services",C_DARK)
+        kpi_box(kd3,df_dummy["Vendor"].nunique(),
+                "Vendors",C_MID)
+        kpi_box(kd4,df_dummy["Category"].nunique(),
+                "Categories",C_GREY_DARK)
+    else:
+        st.warning("dummy_catalog.csv not found.")
+
+st.markdown("<br>",unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════
+# GLOBAL NAV STRIP (category cards — master catalog)
+# ════════════════════════════════════════════════════════════
+if not NO_MASTER:
+    cats_list=sorted([
+        c for c in df_master["Category"].unique()
+        if str(c).strip() not in ["","nan"]])
+    nav_cols=st.columns(len(cats_list)+1)
+    nav_cols[0].markdown(
+        "<div style='font-size:0.72em;font-weight:700;"
+        "color:#D04A02;letter-spacing:1px;"
+        "text-transform:uppercase;padding-top:4px'>"
+        "CATEGORIES</div>",
+        unsafe_allow_html=True)
+    for i,cat in enumerate(cats_list):
+        cnt=len(df_master[df_master["Category"]==cat])
+        nav_cols[i+1].markdown(
+            "<div style='background:white;"
+            "border:1px solid #E0E0E0;"
+            "border-top:3px solid #D04A02;"
+            "border-radius:4px;"
+            "padding:8px 10px;text-align:center'>"
+            "<div style='font-size:0.72em;font-weight:700;"
+            "color:#2D2D2D;white-space:nowrap;"
+            "overflow:hidden;text-overflow:ellipsis'>"
+            "{}</div>"
+            "<div style='font-size:1.1em;font-weight:800;"
+            "color:#D04A02;font-family:Georgia,serif'>"
+            "{}</div>"
+            "<div style='font-size:0.63em;color:#7D7D7D;"
+            "text-transform:uppercase;letter-spacing:0.5px'>"
+            "quotes</div></div>".format(cat,cnt),
+            unsafe_allow_html=True)
+    st.markdown("<br>",unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════
+# TABS — Two buckets clearly labelled
+# ════════════════════════════════════════════════════════════
+(tab_mc_ov,      # Master Catalog Overview
+ tab_mc_bv,      # Master Catalog Browse & Verdict
+ tab_dd_ov,      # Dummy Data Overview
+ tab_dd_bv,      # Dummy Data Browse & Verdict
+ tab_upload,     # Upload & Score
+ tab_data,       # Data Table
+ tab_upload_cat, # Upload Catalog
+ tab_vendor,     # Vendor Analysis
+ ) = st.tabs([
+    "📁 MC — Catalog Overview",
+    "📁 MC — Browse & Verdict",
+    "📊 DD — Catalog Overview",
+    "📊 DD — Browse & Verdict",
+    "📤 Upload & Score",
+    "📄 Data Table",
+    "🗂 Upload Catalog",
+    "🔍 Vendor Analysis",
+])
+
+# ════════════════════════════════════════════════════════════
+# TAB: MC — CATALOG OVERVIEW
+# ════════════════════════════════════════════════════════════
+with tab_mc_ov:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📁 MASTER CATALOG — CATALOG OVERVIEW"
+        "</div>",unsafe_allow_html=True)
+    if NO_MASTER:
+        st.info("Master Catalog.xlsx not found.")
+    else:
+        render_catalog_overview(
+            df_master,df_exp_master,
+            label="Master Catalog")
+
+# ════════════════════════════════════════════════════════════
+# TAB: MC — BROWSE & VERDICT
+# ════════════════════════════════════════════════════════════
+with tab_mc_bv:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📁 MASTER CATALOG — BROWSE &amp; VERDICT"
+        "<span style='font-size:0.8em;opacity:0.7;"
+        "margin-left:12px'>"
+        "No prices available (SharePoint files)</span>"
+        "</div>",unsafe_allow_html=True)
+    if NO_MASTER:
+        st.info("Master Catalog.xlsx not found.")
+    else:
+        render_browse_verdict(
+            df_master,df_exp_master,
+            vcmap=vcmap_master,
+            label="Master Catalog",
+            has_prices=False,
+            chat_key_suffix="mc")
+
+# ════════════════════════════════════════════════════════════
+# TAB: DD — CATALOG OVERVIEW
+# ════════════════════════════════════════════════════════════
+with tab_dd_ov:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📊 DUMMY DATA — CATALOG OVERVIEW"
+        "<span style='font-size:0.8em;opacity:0.7;"
+        "margin-left:12px'>"
+        "Full price analysis available</span>"
+        "</div>",unsafe_allow_html=True)
+    if NO_DUMMY:
+        st.info("dummy_catalog.csv not found.")
+    else:
+        render_catalog_overview(
+            df_dummy,df_exp_dummy,
+            label="Dummy Data")
+
+# ════════════════════════════════════════════════════════════
+# TAB: DD — BROWSE & VERDICT
+# ════════════════════════════════════════════════════════════
+with tab_dd_bv:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📊 DUMMY DATA — BROWSE &amp; VERDICT"
+        "<span style='font-size:0.8em;opacity:0.7;"
+        "margin-left:12px'>"
+        "✅ Full price analysis · Scores · Verdicts"
+        "</span></div>",unsafe_allow_html=True)
+    if NO_DUMMY:
+        st.info("dummy_catalog.csv not found.")
+    else:
+        render_browse_verdict(
+            df_dummy,df_exp_dummy,
+            vcmap=vcmap_dummy,
+            label="Dummy Data",
+            has_prices=True,
+            chat_key_suffix="dd")
+
+# ════════════════════════════════════════════════════════════
+# TAB: UPLOAD & SCORE
+# ════════════════════════════════════════════════════════════
+with tab_upload:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📤 UPLOAD &amp; SCORE</div>",
+        unsafe_allow_html=True)
+
+    # Use dummy data as benchmark (has prices)
+    df_bench   = df_dummy   if not NO_DUMMY else df_master
+    df_exp_bench = df_exp_dummy if not NO_DUMMY else df_exp_master
+    bench_label= "Dummy Data" if not NO_DUMMY else "Master Catalog"
+
+    if df_bench is None:
+        st.info("No catalog loaded for benchmarking.")
+    else:
+        insight(
+            "Benchmarking against: <b>{}</b>".format(
+                bench_label))
+        prefill_price=st.session_state.get(
+            "tab2_upload_price",0.0)
+        prefill_fname=st.session_state.get(
+            "tab2_upload_fname","")
+        if prefill_fname:
+            st.markdown(
+                "<div class='insight-box'>"
+                "📎 From chat: <b>{}</b> — "
+                "price: <b>{}</b></div>".format(
+                    prefill_fname,
+                    _fmt(prefill_price)
+                    if prefill_price>0
+                    else "not found"),
+                unsafe_allow_html=True)
+
+        sec("STEP 1 — UPLOAD QUOTE FILE")
+        uploaded=st.file_uploader(
+            "Upload",
+            type=["pdf","xlsx","xls","docx"],
+            label_visibility="collapsed",
+            key="up_score_file")
+        new_price=0.0; fname_up=""
+        if uploaded is not None:
+            content=uploaded.read()
+            ext_up=uploaded.name.rsplit(".",1)[-1]
+            fname_up=uploaded.name
+            st.success("Uploaded: **{}** ({} KB)".format(
+                fname_up,round(len(content)/1024,1)))
+            sec("STEP 2 — EXTRACTED PRICE")
+            with st.spinner("Extracting…"):
+                res=extract_price_from_bytes(
+                    content,ext_up)
+                new_price=res["price_num"]
+            if new_price>0:
+                st.markdown(
+                    "<div class='scard scard-orange'>"
+                    "<div style='font-size:0.70em;"
+                    "font-weight:700;text-transform:"
+                    "uppercase;color:#D04A02'>"
+                    "Extracted Price</div>"
+                    "<div style='font-size:2.1em;"
+                    "font-weight:800;color:#D04A02;"
+                    "font-family:Georgia,serif'>"
+                    "{}</div></div>".format(_fmt(new_price)),
+                    unsafe_allow_html=True)
+            else:
+                st.warning("Price not found automatically.")
+                manual=st.number_input(
+                    "Enter price manually (USD)",
+                    min_value=0.0,step=100.0,value=0.0,
+                    key="manual_price_up")
+                if manual>0: new_price=manual
+        elif prefill_price>0:
+            new_price=prefill_price
+            fname_up=prefill_fname
+
+        sec("STEP 3 — SELECT SERVICES & FILTERS")
+        up1,up2,up3=st.columns(3)
+        with up1:
+            cat_up=st.selectbox(
+                "📂 Filter by Category",
+                ["All"]+sorted([
+                    c for c in df_bench[
+                        "Category"].unique()
+                    if str(c).strip()
+                    not in ["","nan"]]),
+                key="cat_up_score")
+        with up2:
+            svcs_up=sorted([
+                s for s in df_exp_bench[
+                    "Service"].unique()
+                if str(s).strip()
+                not in ["","nan"]])
+            svc_srch=st.text_input(
+                "🔍 Filter services",
+                placeholder="Search…",
+                key="svc_srch_score")
+            if svc_srch:
+                svcs_up=[s for s in svcs_up
+                          if svc_srch.lower() in s.lower()]
+        with up3:
+            new_svcs=st.multiselect(
+                "🛠 Select Services",
+                options=svcs_up,
+                key="new_svcs_score")
+
+        sec("STEP 4 — COMPARISON & VERDICT")
+        if new_price<=0 and not new_svcs:
+            st.info(
+                "Upload a file and select services "
+                "to compare.")
+        else:
+            cands=(
+                df_exp_bench[
+                    df_exp_bench["Service"].isin(
+                        new_svcs)].copy()
+                if new_svcs
+                else df_exp_bench.copy())
+            if cat_up!="All":
+                cands=cands[cands["Category"]==cat_up]
+            cf=(cands.drop_duplicates(
+                subset=["File Name","Vendor"])
+                [["File Name","Vendor","Category",
+                  "Quoted Price"]].copy()
+                if "Quoted Price" in cands.columns
+                else cands.drop_duplicates(
+                    subset=["File Name","Vendor"])
+                [["File Name","Vendor","Category"]].copy())
+
+            if cf.empty:
+                st.warning("No historical quotes found.")
+            else:
+                hist=[]
+                if "Quoted Price" in cf.columns:
+                    for _,r in cf.iterrows():
+                        qp=_parse_num(str(r.get(
+                            "Quoted Price","")).strip())
+                        if qp>0: hist.append(qp)
+
+                if new_price>0 and hist:
+                    ps,lbl,avh,mnh,mxh=price_score(
+                        new_price,hist)
+                    vt,vd,vc5=get_verdict(ps)
+                    css=("orange" if (ps or 0)>=70
+                          else "mid" if (ps or 0)>=40
+                          else "dark")
+                    bgs={"orange":"#FFF5F0",
+                          "mid":"#F5F5F5",
+                          "dark":"#F0F0F0"}
+                    bds={"orange":C_ORANGE,
+                          "mid":C_GREY_DARK,
+                          "dark":C_DARK}
+                    st.markdown(
+                        "<div style='background:{};"
+                        "border:2px solid {};"
+                        "border-radius:4px;"
+                        "padding:16px 20px;"
+                        "margin-bottom:16px'>"
+                        "<div style='font-size:1.2em;"
+                        "font-weight:700;color:{};"
+                        "font-family:Georgia,serif'>"
+                        "{}</div>"
+                        "<div style='font-size:0.87em;"
+                        "color:#4A4A4A;margin-top:5px'>"
+                        "{}</div></div>".format(
+                            bgs[css],bds[css],
+                            bds[css],vt,vd),
+                        unsafe_allow_html=True)
+
+                    sv1,sv2,sv3,sv4=st.columns(4)
+                    sv1.markdown(
+                        "<div class='scard scard-orange'>"
+                        "<div style='font-size:0.67em;"
+                        "font-weight:700;"
+                        "text-transform:uppercase;"
+                        "color:#D04A02'>Score</div>"
+                        "<div style='font-size:2.1em;"
+                        "font-weight:800;color:#D04A02;"
+                        "font-family:Georgia,serif'>"
+                        "{}/100</div>"
+                        "<div style='font-size:0.73em;"
+                        "color:#7D7D7D;margin-top:3px'>"
+                        "vs {} historical</div>"
+                        "</div>".format(
+                            ps if ps is not None
+                            else "N/A",len(hist)),
+                        unsafe_allow_html=True)
+                    sv2.markdown(
+                        "<div class='scard scard-dark'>"
+                        "<div style='font-size:0.67em;"
+                        "font-weight:700;"
+                        "text-transform:uppercase;"
+                        "color:#2D2D2D'>Your Price</div>"
+                        "<div style='font-size:2.1em;"
+                        "font-weight:800;color:#D04A02;"
+                        "font-family:Georgia,serif'>"
+                        "{}</div></div>".format(
+                            _fmt(new_price)),
+                        unsafe_allow_html=True)
+                    sv3.markdown(
+                        "<div class='scard scard-dark'>"
+                        "<div style='font-size:0.67em;"
+                        "font-weight:700;"
+                        "text-transform:uppercase;"
+                        "color:#2D2D2D'>"
+                        "Market Average</div>"
+                        "<div style='font-size:2.1em;"
+                        "font-weight:800;color:#4A4A4A;"
+                        "font-family:Georgia,serif'>"
+                        "{}</div>"
+                        "<div style='font-size:0.72em;"
+                        "color:#7D7D7D;margin-top:3px'>"
+                        "min {} · max {}</div>"
+                        "</div>".format(
+                            _fmt(avh),_fmt(mnh),_fmt(mxh)),
+                        unsafe_allow_html=True)
+                    sv4.markdown(
+                        "<div class='scard scard-grey'>"
+                        "<div style='font-size:0.67em;"
+                        "font-weight:700;"
+                        "text-transform:uppercase;"
+                        "color:#7D7D7D'>vs Average</div>"
+                        "<div style='font-size:0.95em;"
+                        "font-weight:800;color:#4A4A4A;"
+                        "margin-top:8px'>"
+                        "{}</div></div>".format(lbl),
+                        unsafe_allow_html=True)
+
+                    st.markdown("<br>",
+                                 unsafe_allow_html=True)
+                    sec("PRICE POSITIONING CHART")
+                    cd2=[]
+                    if "Quoted Price" in cf.columns:
+                        for _,r in cf.iterrows():
+                            pv=_parse_num(str(r.get(
+                                "Quoted Price","")).strip())
+                            if pv>0:
+                                cd2.append({
+                                    "Label":"{}/{}".format(
+                                        r["Vendor"],
+                                        str(r["File Name"])[:10]),
+                                    "Price":pv,
+                                    "Type":"Historical"})
+                    cd2.append({
+                        "Label":"★ YOUR QUOTE",
+                        "Price":new_price,
+                        "Type":"New"})
+                    cdf2=pd.DataFrame(cd2
+                        ).sort_values("Price")
+                    bc2=[C_ORANGE if t=="New"
+                          else C_DARK
+                          for t in cdf2["Type"]]
+                    fig_up=go.Figure(go.Bar(
+                        x=cdf2["Label"],
+                        y=cdf2["Price"],
+                        marker_color=bc2,
+                        marker_line_width=0,
+                        text=cdf2["Price"].apply(_fmt),
+                        textposition="outside"))
+                    fig_up.add_hline(
+                        y=avh,line_dash="dash",
+                        line_color=C_GREY_DARK,
+                        line_width=2,
+                        annotation_text="Avg: {}".format(
+                            _fmt(avh)),
+                        annotation_position="top right")
+                    fig_up.update_layout(
+                        height=380,plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(l=5,r=10,t=20,b=10),
+                        font=CFONT,
+                        yaxis=dict(
+                            title="Price (USD)",
+                            showgrid=True,
+                            gridcolor=C_GREY_LITE,
+                            zeroline=False),
+                        xaxis=dict(tickangle=-25),
+                        bargap=0.3,showlegend=False)
+                    st.plotly_chart(fig_up,
+                                     use_container_width=True)
+                    pct_vs=round(
+                        (new_price-avh)/avh*100,1
+                    ) if avh>0 else 0
+                    insight(
+                        "Your quote <b>{}</b> is "
+                        "<b>{}% {}</b> market avg "
+                        "<b>{}</b>. Range: "
+                        "<b>{}</b>–<b>{}</b>.".format(
+                            _fmt(new_price),abs(pct_vs),
+                            "below" if pct_vs<0
+                            else "above",
+                            _fmt(avh),_fmt(mnh),_fmt(mxh)))
+                else:
+                    st.info(
+                        "No historical price data. "
+                        "Select more services or use "
+                        "Dummy Data tab.")
+
+# ════════════════════════════════════════════════════════════
+# TAB: DATA TABLE
+# ════════════════════════════════════════════════════════════
+with tab_data:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "📄 DATA TABLE</div>",
+        unsafe_allow_html=True)
+    src_choice=st.radio(
+        "Data source",
+        ["Master Catalog","Dummy Data"],
+        horizontal=True,key="dt_src")
+    df_dt=(df_master if src_choice=="Master Catalog"
+            else df_dummy)
+    df_dt_use=(df_dt if df_dt is not None
+                else pd.DataFrame())
+
+    tf1,tf2,tf3=st.columns(3)
+    with tf1:
+        dt_cat=st.selectbox(
+            "📂 Category",
+            ["All"]+sorted([
+                c for c in df_dt_use.get(
+                    "Category",pd.Series()).unique()
+                if str(c).strip()
+                not in ["","nan"]])
+            if not df_dt_use.empty else ["All"],
+            key="dt_cat")
+    with tf2:
+        vp_dt=(df_dt_use if dt_cat=="All"
+                else df_dt_use[
+                    df_dt_use["Category"]==dt_cat])
+        dt_ven=st.selectbox(
+            "🏢 Vendor",
+            ["All"]+sorted([
+                v for v in vp_dt.get(
+                    "Vendor",pd.Series()).unique()
+                if str(v).strip()
+                not in ["","nan"]])
+            if not vp_dt.empty else ["All"],
+            key="dt_ven")
+    with tf3:
+        dt_srch=st.text_input(
+            "🔍 Search",
+            placeholder="File name or comments…",
+            key="dt_srch")
+
+    dm=df_dt_use.copy()
+    if not dm.empty:
+        if dt_cat!="All":
+            dm=dm[dm["Category"]==dt_cat]
+        if dt_ven!="All":
+            dm=dm[dm["Vendor"]==dt_ven]
+        if dt_srch:
+            mask=(dm["File Name"].str.contains(
+                dt_srch,case=False,na=False)
+                  |dm["Comments"].str.contains(
+                dt_srch,case=False,na=False))
+            dm=dm[mask]
+        st.markdown(
+            "<div style='font-size:0.82em;"
+            "color:#7D7D7D;margin:8px 0'>"
+            "Showing <b>{}</b> of <b>{}</b> "
+            "records</div>".format(
+                len(dm),len(df_dt_use)),
+            unsafe_allow_html=True)
+        st.dataframe(
+            dm.drop(
+                columns=["Services List","Hyperlink"],
+                errors="ignore"),
+            use_container_width=True,height=520)
+    else:
+        st.info("No data available.")
+
+# ════════════════════════════════════════════════════════════
+# TAB: UPLOAD CATALOG
+# ════════════════════════════════════════════════════════════
+with tab_upload_cat:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "🗂 UPLOAD CATALOG</div>",
+        unsafe_allow_html=True)
+    insight(
+        "Upload a new catalog to replace the "
+        "current one. Supports Excel (.xlsx) "
+        "and CSV formats.")
+    cat_file=st.file_uploader(
+        "Upload",type=["xlsx","xls","csv"],
+        label_visibility="collapsed",
+        key="catalog_upload")
+    if cat_file is not None:
+        fb=cat_file.read(); fn=cat_file.name
+        with st.spinner("Analysing…"):
+            from io import BytesIO as _BIO
+            ext_c=fn.rsplit(".",1)[-1].lower()
+            try:
+                if ext_c in ("xlsx","xls"):
+                    df_n=pd.read_excel(
+                        _BIO(fb),engine="openpyxl")
+                else:
+                    df_n=pd.read_csv(_BIO(fb))
+                df_n.columns=[str(c).strip()
+                               for c in df_n.columns]
+                df_n=_norm_cols(df_n)
+                df_n=_clean_df(df_n)
+                df_n["Hyperlink"]=""
+                df_n,dfe_n=_explode(df_n)
+                st.success(
+                    "✅ **{}** rows · **{}** vendors · "
+                    "**{}** categories".format(
+                        len(df_n),
+                        df_n["Vendor"].nunique(),
+                        df_n["Category"].nunique()))
+                st.dataframe(
+                    df_n.drop(
+                        columns=["Services List",
+                                  "Hyperlink"],
+                        errors="ignore").head(20),
+                    use_container_width=True,
+                    height=280)
+                if st.button(
+                        "✅ Apply as Master Catalog",
+                        type="primary"):
+                    st.session_state[
+                        "uploaded_catalog_df"]=df_n
+                    st.session_state[
+                        "uploaded_catalog_exp"]=dfe_n
+                    st.success("✅ Applied!")
+                    st.rerun()
+            except Exception as e:
+                st.error("❌ {}".format(e))
+
+# ════════════════════════════════════════════════════════════
+# TAB: VENDOR ANALYSIS
+# ════════════════════════════════════════════════════════════
+with tab_vendor:
+    st.markdown(
+        "<div class='bucket-header'>"
+        "🔍 VENDOR ANALYSIS — DUMMY DATA "
+        "(Full Price Analysis)</div>",
+        unsafe_allow_html=True)
+    if NO_DUMMY:
+        st.info("Dummy data not available.")
+    else:
+        sec("VENDOR PRICE SUMMARY",
+            "Based on dummy data with actual prices")
+        vt_dd=(df_dummy.groupby("Vendor")[
+            "Quoted Price"]
+                .agg(["mean","min","max","count"])
+                .reset_index()
+                if "Quoted Price" in df_dummy.columns
+                else pd.DataFrame())
+
+        if not vt_dd.empty:
+            vt_dd.columns=[
+                "Vendor","Average","Min","Max","Quotes"]
+            vt_dd=vt_dd.sort_values("Average")
+            oa=vt_dd["Average"].mean()
+
+            k1,k2,k3,k4=st.columns(4)
+            kpi_box(k1,len(df_dummy),
+                     "Total Quotes",C_ORANGE)
+            kpi_box(k2,df_dummy["Vendor"].nunique(),
+                     "Vendors",C_DARK)
+            kpi_box(k3,_fmt(oa),
+                     "Overall Avg Quote",C_MID)
+            kpi_box(k4,
+                     df_exp_dummy["Service"].nunique(),
+                     "Services",C_GREY_DARK)
+            st.markdown("<br>",unsafe_allow_html=True)
+
+            bc_va=[C_ORANGE if i==0
+                    else C_DARK if i==len(vt_dd)-1
+                    else C_GREY_DARK
+                    for i in range(len(vt_dd))]
+            fig_va=go.Figure(go.Bar(
+                x=vt_dd["Vendor"],
+                y=vt_dd["Average"],
+                marker_color=bc_va,
+                marker_line_width=0,
+                text=vt_dd["Average"].apply(_fmt),
+                textposition="outside"))
+            fig_va.add_hline(
+                y=oa,line_dash="dash",
+                line_color=C_MID,line_width=2,
+                annotation_text="Avg: {}".format(
+                    _fmt(oa)),
+                annotation_position="top right")
+            pwc_bar(fig_va,
+                     "Average Quote per Vendor",
+                     height=360)
+            fig_va.update_xaxes(tickangle=-20)
+            st.plotly_chart(fig_va,
+                             use_container_width=True)
+
+            sec("VENDOR RANKING TABLE")
+            vtbl=["<table class='comp-table'>"
+                  "<thead><tr>"
+                  "<th>Rank</th><th>Vendor</th>"
+                  "<th>Quotes</th><th>Avg</th>"
+                  "<th>Min</th><th>Max</th>"
+                  "<th>vs Avg</th><th>Verdict</th>"
+                  "</tr></thead><tbody>"]
+            for rank,(_,vr) in enumerate(
+                    vt_dd.iterrows(),start=1):
+                bg=("white" if rank%2==0
+                     else "#F8F8F8")
+                vc=vcmap_dummy.get(vr["Vendor"],C_DARK)
+                pct=round(
+                    (vr["Average"]-oa)/oa*100,1
+                ) if oa>0 else 0
+                pc=(C_ORANGE if pct<-5
+                     else C_DARK if pct>5
+                     else C_GREY_DARK)
+                pt=("{}% below".format(abs(pct))
+                     if pct<0
+                     else "{}% above".format(abs(pct))
+                     if pct>0 else "At avg")
+                ov=(("✅ COMPETITIVE",C_ORANGE)
+                     if pct<-10
+                     else ("🔴 EXPENSIVE",C_DARK)
+                     if pct>10
+                     else ("🟡 AVERAGE",C_GREY_DARK))
+                medal=("🥇" if rank==1
+                        else "🥈" if rank==2
+                        else "🥉" if rank==3
+                        else str(rank))
+                vtbl.append(
+                    "<tr style='background:{}'>"
+                    "<td style='text-align:center;"
+                    "font-size:1.05em'>{}</td>"
+                    "<td>{}</td>"
+                    "<td style='text-align:center;"
+                    "font-weight:700'>{}</td>"
+                    "<td style='font-family:monospace;"
+                    "font-weight:700;color:#D04A02'>"
+                    "{}</td>"
+                    "<td style='font-family:monospace;"
+                    "color:#D04A02'>{}</td>"
+                    "<td style='font-family:monospace;"
+                    "color:#2D2D2D'>{}</td>"
+                    "<td style='color:{}'>{}</td>"
+                    "<td style='color:{};"
+                    "font-weight:700'>{}</td>"
+                    "</tr>".format(
+                        bg,medal,vpill(vr["Vendor"],vc),
+                        int(vr["Quotes"]),
+                        _fmt(vr["Average"]),
+                        _fmt(vr["Min"]),
+                        _fmt(vr["Max"]),
+                        pc,pt,ov[1],ov[0]))
+            vtbl.append("</tbody></table>")
+            st.markdown("".join(vtbl),
+                         unsafe_allow_html=True)
+
+            # Per-service
+            st.markdown("<br>",unsafe_allow_html=True)
+            sec("PER-SERVICE PRICE BENCHMARKING",
+                "Services with multiple vendor quotes")
+            svc_rows=[]
+            for _,r in df_dummy.iterrows():
+                svcs_raw=str(r.get("Comments","")
+                              ).replace("\\n","\n"
+                                        ).replace("\r\n","\n"
+                                                   ).replace("\r","\n")
+                ss=[s.strip() for s in svcs_raw.split("\n")
+                    if s.strip()
+                    and s.strip() not in ["nan","None",""]]
+                if not ss: ss=[svcs_raw.strip()]
+                for s in ss:
+                    svc_rows.append({
+                        "Service":s,
+                        "Vendor":r["Vendor"],
+                        "Price":_parse_num(str(r.get(
+                            "Quoted Price","")).strip())})
+            df_sv=pd.DataFrame(svc_rows)
+            df_sv=df_sv[df_sv["Price"]>0]
+            svc_vc=(df_sv.groupby("Service")[
+                "Vendor"].nunique())
+            multi=(svc_vc[svc_vc>1].index.tolist())
+
+            if not multi:
+                st.info("No multi-vendor services.")
+            else:
+                insight(
+                    "<b>{}</b> services with "
+                    "multi-vendor quotes.".format(
+                        len(multi)))
+                for svc in sorted(multi)[:10]:
+                    ds=(df_sv[df_sv["Service"]==svc]
+                        .sort_values("Price"))
+                    mn=ds["Price"].min()
+                    mx=ds["Price"].max()
+                    av=ds["Price"].mean()
+                    bv=ds.loc[ds["Price"].idxmin(),"Vendor"]
+                    wv=ds.loc[ds["Price"].idxmax(),"Vendor"]
+                    sp=round((mx-mn)/mn*100,1) if mn>0 else 0
+                    st.markdown(
+                        "<div style='background:white;"
+                        "border-left:4px solid {};"
+                        "padding:10px 14px;"
+                        "border-radius:2px;"
+                        "margin:10px 0;"
+                        "font-weight:700;"
+                        "font-size:0.88em'>"
+                        "{} · {} vendors · spread {}% · "
+                        "best: {} @ {}</div>".format(
+                            C_ORANGE,svc,
+                            ds["Vendor"].nunique(),
+                            sp,bv,_fmt(mn)),
+                        unsafe_allow_html=True)
+                    bc_s=[C_ORANGE if v==bv
+                           else C_DARK if v==wv
+                           else C_GREY_DARK
+                           for v in ds["Vendor"]]
+                    fig_s=go.Figure(go.Bar(
+                        x=ds["Vendor"],y=ds["Price"],
+                        marker_color=bc_s,
+                        marker_line_width=0,
+                        text=ds["Price"].apply(_fmt),
+                        textposition="outside"))
+                    fig_s.add_hline(
+                        y=av,line_dash="dash",
+                        line_color=C_MID,line_width=1.5,
+                        annotation_text="Avg: {}".format(
+                            _fmt(av)),
+                        annotation_position="top right")
+                    fig_s.update_layout(
+                        height=240,plot_bgcolor=CBG,
+                        paper_bgcolor=CBG,
+                        margin=dict(l=5,r=10,t=12,b=8),
+                        font=CFONT,
+                        yaxis=dict(showgrid=True,
+                                   gridcolor=C_GREY_LITE,
+                                   zeroline=False),
+                        bargap=0.4,showlegend=False)
+                    st.plotly_chart(fig_s,
+                                     use_container_width=True)
+
+            st.markdown("<br>",unsafe_allow_html=True)
+            st.download_button(
+                "📥 Download Dummy Data CSV",
+                data=df_dummy.to_csv(index=False),
+                file_name="dummy_analysis.csv",
+                mime="text/csv",
+                type="primary")
                                        
