@@ -1229,8 +1229,67 @@ def render_browse_verdict(df_master, df_exploded,
                     "<div class='chat-wrap'>"
                     "<div class='msg-bot'>{}</div>"
                     "</div>".format(bot))
-        chat_html+="</div>"
-        st.markdown(chat_html,unsafe_allow_html=True)
+        # Quick chips INSIDE the chat window
+        chips = [
+            "Who quoted Cisco Catalyst?",
+            "Compare Palo Alto prices",
+            "Cheapest Cybersecurity vendor?",
+            "What does TrendMicro offer?",
+            "List all vendors",
+            "Catalog summary",
+        ]
+        chip_html = (
+            "<div style='border-top:1px solid #E0E0E0;"
+            "padding:8px 4px 2px;margin-top:6px;"
+            "overflow:hidden'>"
+            "<div style='font-size:0.70em;font-weight:700;"
+            "letter-spacing:0.8px;text-transform:uppercase;"
+            "color:#7D7D7D;margin-bottom:5px'>"
+            "QUICK QUESTIONS</div>"
+            + "".join(
+                "<span style='display:inline-block;"
+                "background:white;"
+                "border:1.5px solid #D04A02;"
+                "color:#D04A02;border-radius:20px;"
+                "padding:3px 11px;font-size:0.77em;"
+                "font-weight:600;margin:2px 3px;"
+                "white-space:nowrap'>{}</span>".format(c)
+                for c in chips)
+            + "</div>")
+        chat_html += chip_html
+        chat_html += "</div>"   # close chat-outer
+        st.markdown(chat_html, unsafe_allow_html=True)
+
+        # Functional chip buttons — compact row
+        st.markdown(
+            "<div style='font-size:0.71em;color:#7D7D7D;"
+            "font-weight:600;letter-spacing:0.6px;"
+            "margin:4px 0 2px'>CLICK TO ASK:</div>",
+            unsafe_allow_html=True)
+        chip_cols = st.columns(3)
+        chip_map = [
+            ("Who quoted Cisco Catalyst?", 0),
+            ("Compare Palo Alto prices",   1),
+            ("Cheapest Cybersecurity?",    2),
+            ("TrendMicro profile",         0),
+            ("List all vendors",           1),
+            ("Catalog summary",            2),
+        ]
+        for chip_txt, col_idx in chip_map:
+            if chip_cols[col_idx].button(
+                    chip_txt,
+                    key="chip_{}_{}".format(
+                        chat_key, chip_txt[:20]),
+                    use_container_width=True):
+                resp = chatbot_response(
+                    chip_txt, df_master, df_exploded)
+                st.session_state[
+                    chat_history_key].append({
+                    "user":     chip_txt,
+                    "bot_text": resp["text"],
+                    "bot_resp": resp,
+                })
+                st.rerun()
 
         # Show last chart
         if st.session_state[chat_history_key]:
@@ -2553,12 +2612,14 @@ with tab_vendor:
     else:
         sec("VENDOR PRICE SUMMARY",
             "Based on dummy data with actual prices")
-        vt_dd=(df_dummy.groupby("Vendor")[
-            "Quoted Price"]
-                .agg(["mean","min","max","count"])
-                .reset_index()
-                if "Quoted Price" in df_dummy.columns
-                else pd.DataFrame())
+        if "Quoted Price" in df_dummy.columns:
+            df_dummy["Quoted Price"] = pd.to_numeric(
+                df_dummy["Quoted Price"], errors="coerce")
+            vt_dd = (df_dummy.groupby("Vendor")["Quoted Price"]
+                     .agg(["mean","min","max","count"])
+                     .reset_index())
+        else:
+            vt_dd = pd.DataFrame()
 
         if not vt_dd.empty:
             vt_dd.columns=[
