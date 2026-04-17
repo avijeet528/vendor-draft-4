@@ -545,24 +545,15 @@ def load_data():
     # ── Try Excel first (full real data) ──
     if os.path.exists(XLS_PATH):
         try:
-            raw = pd.read_excel(
-                XLS_PATH, engine="openpyxl",
-                header=None)
+            raw = pd.read_excel(XLS_PATH, engine="openpyxl", header=None)
             header_row = 0
             for i, row in raw.iterrows():
-                vals = [
-                    str(v).strip().lower()
-                    for v in row.values if pd.notna(v)]
-                if (any("category" in v for v in vals)
-                        and any("vendor" in v
-                                for v in vals)):
+                vals = [str(v).strip().lower() for v in row.values if pd.notna(v)]
+                if any("category" in v for v in vals) and any("vendor" in v for v in vals):
                     header_row = i
                     break
-            df = pd.read_excel(
-                XLS_PATH, engine="openpyxl",
-                header=header_row)
-            df.columns = [
-                str(c).strip() for c in df.columns]
+            df = pd.read_excel(XLS_PATH, engine="openpyxl", header=header_row)
+            df.columns = [str(c).strip() for c in df.columns]
         except Exception as e:
             st.warning("Excel load error: {}".format(e))
             df = None
@@ -571,8 +562,7 @@ def load_data():
     if df is None and os.path.exists(CSV_PATH):
         try:
             df = pd.read_csv(CSV_PATH)
-            df.columns = [
-                str(c).strip() for c in df.columns]
+            df.columns = [str(c).strip() for c in df.columns]
         except Exception as e:
             st.warning("CSV load error: {}".format(e))
             df = None
@@ -586,93 +576,71 @@ def load_data():
         cl = str(c).lower().strip()
         if cl == "category":
             col_map["Category"] = c
-        elif any(k in cl for k in
-                 ["vendor", "supplier"]):
+        elif any(k in cl for k in ["vendor", "supplier"]):
             col_map["Vendor"] = c
         elif "file name" in cl or cl == "filename":
             col_map["File Name"] = c
-        elif any(k in cl for k in
-                 ["file link", "file url",
-                  "url", "link"]):
+        elif any(k in cl for k in ["file link", "file url", "url", "link"]):
             col_map["File Link"] = c
-        elif any(k in cl for k in
-                 ["comment", "service",
-                  "description", "scope"]):
+        elif any(k in cl for k in ["comment", "service", "description", "scope"]):
             col_map["Comments"] = c
-        elif any(k in cl for k in
-                 ["price", "cost",
-                  "amount", "quoted"]):
+        elif any(k in cl for k in ["price", "cost", "amount", "quoted"]):
             col_map["Quoted Price"] = c
 
-    df.rename(
-        columns={v: k for k, v in col_map.items()},
-        inplace=True)
+    df.rename(columns={v: k for k, v in col_map.items()}, inplace=True)
 
     # ── Ensure required columns exist ──
-    for req in ["Category", "Vendor",
-                "File Name", "Comments"]:
+    for req in ["Category", "Vendor", "File Name", "Comments"]:
         if req not in df.columns:
             df[req] = ""
 
-    keep = ["Category", "Vendor",
-            "File Name", "Comments"]
+    keep = ["Category", "Vendor", "File Name", "Comments"]
     for e in ["File Link", "Quoted Price"]:
         if e in df.columns:
             keep.append(e)
-    df = df[[c for c in keep
-             if c in df.columns]].copy()
+    df = df[[c for c in keep if c in df.columns]].copy()
 
     # ── Drop fully empty rows ──
     df = df[~(
-        df["Category"].astype(str).str.strip()
-        .isin(["", "nan"]) &
-        df["Vendor"].astype(str).str.strip()
-        .isin(["", "nan"]))].copy()
+        df["Category"].apply(lambda x: str(x).strip()).isin(["", "nan"]) &
+        df["Vendor"].apply(lambda x: str(x).strip()).isin(["", "nan"])
+    )].copy()
 
+    # ── Clean all columns ──
     for col in df.columns:
-        df[col] = (df[col].fillna("")
-                   .astype(str).str.strip())
+        df[col] = df[col].fillna("").apply(lambda x: str(x).strip())
     df.reset_index(drop=True, inplace=True)
 
     # ── File link column ──
     df["Hyperlink"] = ""
     if "File Link" in df.columns:
-        df["Hyperlink"] = df["File Link"].apply(
-            lambda x: ""
-            if x in ["", "nan"] else x)
+        df["Hyperlink"] = df["File Link"].apply(lambda x: "" if x in ["", "nan"] else x)
 
     # ── Parse services ──
     def parse_svc(v):
-        if not v or str(v).strip() in [
-                "", "nan", "None"]:
+        if not v or str(v).strip() in ["", "nan", "None"]:
             return ["(unspecified)"]
         s = str(v)
         s = s.replace("\\n", "\n")
         s = s.replace("\r\n", "\n")
         s = s.replace("\r", "\n")
-        parts = [
-            p.strip() for p in s.split("\n")
-            if p.strip()
-            and p.strip() != "nan"]
+        parts = [p.strip() for p in s.split("\n") if p.strip() and p.strip() != "nan"]
         if not parts:
-            parts = [
-                p.strip() for p in s.split(";")
-                if p.strip()]
+            parts = [p.strip() for p in s.split(";") if p.strip()]
         if not parts:
             if len(s) < 300:
-                parts = [
-                    p.strip() for p in s.split(",")
-                    if p.strip()]
+                parts = [p.strip() for p in s.split(",") if p.strip()]
         return parts if parts else ["(unspecified)"]
 
-
     df["Services List"] = df["Comments"].apply(parse_svc)
+
+    # ── Explode services ──
     df_exp = df.explode("Services List").copy()
     df_exp.rename(columns={"Services List": "Service"}, inplace=True)
     df_exp["Service"] = df_exp["Service"].apply(lambda x: str(x).strip())
     df_exp = df_exp[~df_exp["Service"].isin(["", "(unspecified)", "nan", "None"])].reset_index(drop=True)
-    return df, df_exp
 
+    return df, df_exp
 # ════════════════════════════════════════════════════════════
 # REAL CATALOG ANALYZER
 # Reads Master Catalog.xlsx → follows File Links
