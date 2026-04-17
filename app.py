@@ -88,6 +88,7 @@ button[data-baseweb="tab"]{
 button[data-baseweb="tab"][aria-selected="true"]{
     color:#D04A02 !important;
     border-bottom:3px solid #D04A02 !important;}
+/* In your st.markdown CSS block — ensure these are present */
 div[data-testid="stExpander"] details>summary{
     list-style:none !important;padding-left:12px !important;}
 div[data-testid="stExpander"] details>summary::before,
