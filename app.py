@@ -1848,6 +1848,309 @@ def render_browse_verdict(
                 chat_history_key] = []
             st.rerun()
 
+        # ══════════════════════════════════════
+        # BELOW CHAT — CATALOG SUMMARY CHARTS
+        # ══════════════════════════════════════
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        sec("CATALOG AT A GLANCE",
+            "Live summary from loaded catalog")
+
+        # KPI mini row
+        ck1, ck2, ck3 = st.columns(3)
+        mini_kpi(ck1,
+                 df_master["File Name"].nunique(),
+                 "Total Quotes", C_ORANGE, "📄")
+        mini_kpi(ck2,
+                 df_master["Vendor"].nunique(),
+                 "Vendors", C_DARK, "🏢")
+        mini_kpi(ck3,
+                 df_exploded["Service"].nunique(),
+                 "Services", C_MID, "🛠")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Chart 1 — Quotes per category
+        sec("QUOTES BY CATEGORY")
+        cat_counts = (
+            df_master.groupby("Category")
+            .size().reset_index())
+        cat_counts.columns = ["Category", "Quotes"]
+        cat_counts = cat_counts.sort_values(
+            "Quotes", ascending=True)
+        fig_cc = go.Figure(go.Bar(
+            x=cat_counts["Quotes"],
+            y=cat_counts["Category"],
+            orientation="h",
+            marker_color=C_ORANGE,
+            marker_line_width=0,
+            text=cat_counts["Quotes"],
+            textposition="outside",
+            textfont=dict(size=10)))
+        fig_cc.update_layout(
+            height=max(180,
+                       len(cat_counts) * 38),
+            plot_bgcolor=CBG,
+            paper_bgcolor=CBG,
+            margin=dict(l=5, r=40, t=8, b=8),
+            font=CFONT,
+            xaxis=dict(
+                showgrid=True,
+                gridcolor=C_GREY_LITE,
+                zeroline=False),
+            yaxis=dict(
+                tickfont=dict(size=9.5)),
+            bargap=0.3,
+            showlegend=False)
+        st.plotly_chart(
+            fig_cc, use_container_width=True)
+
+        # Chart 2 — Vendors per category
+        sec("VENDORS BY CATEGORY")
+        ven_counts = (
+            df_master.groupby("Category")[
+                "Vendor"].nunique()
+            .reset_index())
+        ven_counts.columns = [
+            "Category", "Vendors"]
+        ven_counts = ven_counts.sort_values(
+            "Vendors", ascending=True)
+        fig_vc2 = go.Figure(go.Bar(
+            x=ven_counts["Vendors"],
+            y=ven_counts["Category"],
+            orientation="h",
+            marker_color=C_DARK,
+            marker_line_width=0,
+            text=ven_counts["Vendors"],
+            textposition="outside",
+            textfont=dict(size=10)))
+        fig_vc2.update_layout(
+            height=max(180,
+                       len(ven_counts) * 38),
+            plot_bgcolor=CBG,
+            paper_bgcolor=CBG,
+            margin=dict(l=5, r=40, t=8, b=8),
+            font=CFONT,
+            xaxis=dict(
+                showgrid=True,
+                gridcolor=C_GREY_LITE,
+                zeroline=False),
+            yaxis=dict(
+                tickfont=dict(size=9.5)),
+            bargap=0.3,
+            showlegend=False)
+        st.plotly_chart(
+            fig_vc2, use_container_width=True)
+
+        # Chart 3 — Top 10 most quoted services
+        sec("TOP 10 MOST QUOTED SERVICES")
+        top_svcs = (
+            df_exploded.groupby("Service")[
+                "File Name"].nunique()
+            .reset_index()
+            .sort_values(
+                "File Name", ascending=False)
+            .head(10))
+        top_svcs.columns = ["Service", "Quotes"]
+        top_svcs = top_svcs.sort_values(
+            "Quotes", ascending=True)
+        fig_ts = go.Figure(go.Bar(
+            x=top_svcs["Quotes"],
+            y=top_svcs["Service"].apply(
+                lambda x: x[:42]),
+            orientation="h",
+            marker_color=[
+                C_ORANGE if i >= 7
+                else C_ORANGE_MID if i >= 4
+                else C_GREY_DARK
+                for i in range(len(top_svcs))],
+            marker_line_width=0,
+            text=top_svcs["Quotes"],
+            textposition="outside",
+            textfont=dict(size=10)))
+        fig_ts.update_layout(
+            height=380,
+            plot_bgcolor=CBG,
+            paper_bgcolor=CBG,
+            margin=dict(l=5, r=40, t=8, b=8),
+            font=CFONT,
+            xaxis=dict(
+                title="Quote Files",
+                showgrid=True,
+                gridcolor=C_GREY_LITE,
+                zeroline=False),
+            yaxis=dict(
+                autorange="reversed",
+                tickfont=dict(size=9.2)),
+            bargap=0.28,
+            showlegend=False)
+        st.plotly_chart(
+            fig_ts, use_container_width=True)
+
+        # Chart 4 — Vendor quote share donut
+        sec("VENDOR QUOTE SHARE")
+        ven_share = (
+            df_master.groupby("Vendor")
+            .size().reset_index())
+        ven_share.columns = ["Vendor", "Quotes"]
+        ven_share = ven_share.sort_values(
+            "Quotes", ascending=False)
+        fig_vs2 = px.pie(
+            ven_share,
+            values="Quotes",
+            names="Vendor",
+            hole=0.5,
+            color_discrete_sequence=CHART_SEQ)
+        fig_vs2.update_traces(
+            textposition="outside",
+            textinfo="label+percent",
+            textfont_size=9,
+            pull=[0.03] * len(ven_share))
+        fig_vs2.update_layout(
+            height=320,
+            margin=dict(l=5, r=5, t=10, b=10),
+            paper_bgcolor=CBG,
+            font=CFONT,
+            showlegend=False)
+        st.plotly_chart(
+            fig_vs2, use_container_width=True)
+
+        # Chart 5 — Category coverage heatmap
+        # (which vendors appear in which cats)
+        sec("VENDOR × CATEGORY PRESENCE",
+            "Which vendors operate "
+            "in which categories")
+        all_cats_h = sorted([
+            c for c in
+            df_master["Category"].unique()
+            if str(c).strip()
+            not in ["", "nan"]])
+        all_vens_h = sorted([
+            v for v in
+            df_master["Vendor"].unique()
+            if str(v).strip()
+            not in ["", "nan"]])
+        heat2 = []
+        for cat in all_cats_h:
+            for ven in all_vens_h:
+                cnt = len(df_master[
+                    (df_master["Category"] == cat)
+                    & (df_master["Vendor"] == ven)])
+                heat2.append({
+                    "Category": cat[:25],
+                    "Vendor":   ven,
+                    "Count":    cnt})
+        heat2_df = pd.DataFrame(heat2)
+        if not heat2_df.empty:
+            piv2 = heat2_df.pivot_table(
+                index="Category",
+                columns="Vendor",
+                values="Count",
+                fill_value=0)
+            fig_h2 = go.Figure(go.Heatmap(
+                z=piv2.values,
+                x=piv2.columns.tolist(),
+                y=piv2.index.tolist(),
+                colorscale=[
+                    [0,   C_GREY_LITE],
+                    [0.01, C_ORANGE_LITE],
+                    [1,   C_ORANGE]],
+                showscale=True,
+                colorbar=dict(
+                    thickness=10,
+                    tickfont=dict(size=9)),
+                text=piv2.values,
+                texttemplate="%{text}",
+                textfont=dict(size=11)))
+            fig_h2.update_layout(
+                height=max(
+                    220,
+                    len(all_cats_h) * 50),
+                plot_bgcolor=CBG,
+                paper_bgcolor=CBG,
+                margin=dict(
+                    l=5, r=10, t=10, b=10),
+                font=CFONT,
+                xaxis=dict(
+                    tickangle=-25,
+                    tickfont=dict(size=9.5)),
+                yaxis=dict(
+                    tickfont=dict(size=9.5),
+                    autorange="reversed"))
+            st.plotly_chart(
+                fig_h2,
+                use_container_width=True)
+
+        # Price summary (dummy data only)
+        if has_prices and not NO_DUMMY:
+            sec("PRICE DISTRIBUTION",
+                "Min · Avg · Max across "
+                "all dummy data quotes")
+            price_cat = []
+            for cat in all_cats_h:
+                dc2 = df_master[
+                    df_master["Category"] == cat]
+                if "Quoted Price" in dc2.columns:
+                    prices2 = [
+                        _parse_num(str(p))
+                        for p in dc2["Quoted Price"]
+                        if _parse_num(str(p)) > 0]
+                    if prices2:
+                        price_cat.append({
+                            "Category": cat,
+                            "Min":  min(prices2),
+                            "Avg":  sum(prices2)
+                                    / len(prices2),
+                            "Max":  max(prices2)})
+            if price_cat:
+                pc_df = pd.DataFrame(
+                    price_cat).sort_values("Avg")
+                fig_pc = go.Figure()
+                fig_pc.add_trace(go.Bar(
+                    name="Min",
+                    x=pc_df["Category"],
+                    y=pc_df["Min"],
+                    marker_color=C_GREY_LITE,
+                    marker_line_width=0))
+                fig_pc.add_trace(go.Bar(
+                    name="Avg",
+                    x=pc_df["Category"],
+                    y=pc_df["Avg"],
+                    marker_color=C_ORANGE,
+                    marker_line_width=0))
+                fig_pc.add_trace(go.Bar(
+                    name="Max",
+                    x=pc_df["Category"],
+                    y=pc_df["Max"],
+                    marker_color=C_DARK,
+                    marker_line_width=0))
+                fig_pc.update_layout(
+                    height=320,
+                    barmode="group",
+                    plot_bgcolor=CBG,
+                    paper_bgcolor=CBG,
+                    margin=dict(
+                        l=5, r=10, t=10, b=8),
+                    font=CFONT,
+                    yaxis=dict(
+                        title="Price (USD)",
+                        showgrid=True,
+                        gridcolor=C_GREY_LITE,
+                        zeroline=False),
+                    xaxis=dict(
+                        tickangle=-20,
+                        tickfont=dict(size=10)),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1),
+                    bargap=0.25,
+                    bargroupgap=0.05)
+                st.plotly_chart(
+                    fig_pc,
+                    use_container_width=True)
+
         # Handle send
         if sent and user_input.strip():
             resp = chatbot_response(
