@@ -2591,7 +2591,7 @@ with tab2:
         new_price = 0.0; fname_up = ""
         if uploaded is not None:
             content  = uploaded.read()
-            ext_up   = uploaded.name.rsplit(".",1")[-1]
+            ext_up = uploaded.name.rsplit(".", 1)[-1]
             fname_up = uploaded.name
             st.success("Uploaded: **{}** ({} KB)".format(
                 fname_up,
