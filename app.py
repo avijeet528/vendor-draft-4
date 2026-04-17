@@ -130,11 +130,29 @@ button[data-baseweb="tab"][aria-selected="true"]{
 .insight-box{background:#FFF5F0;border-left:4px solid #D04A02;
     border-radius:0 4px 4px 0;padding:11px 16px;margin:10px 0;
     font-size:0.86em;color:#2D2D2D;}
+
 .bucket-header{background:#1A1A1A;color:white;padding:10px 20px;
     border-radius:4px;margin-bottom:6px;
     border-left:6px solid #D04A02;font-size:0.85em;
     font-weight:700;letter-spacing:1px;text-transform:uppercase;}
+
+/* ── Chip buttons styled as pills ── */
+div[data-testid="stHorizontalBlock"]
+    button[kind="secondary"] {
+    background: white !important;
+    border: 1.5px solid #D04A02 !important;
+    color: #D04A02 !important;
+    border-radius: 20px !important;
+    font-size: 0.78em !important;
+    font-weight: 600 !important;
+    padding: 4px 8px !important;
+}
+div[data-testid="stHorizontalBlock"]
+    button[kind="secondary"]:hover {
+    background: #FFF5F0 !important;
+}
 </style>
+
 """, unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════
@@ -1238,45 +1256,36 @@ def render_browse_verdict(df_master, df_exploded,
             "List all vendors",
             "Catalog summary",
         ]
-        chip_html = (
-            "<div style='border-top:1px solid #E0E0E0;"
-            "padding:8px 4px 2px;margin-top:6px;"
-            "overflow:hidden'>"
-            "<div style='font-size:0.70em;font-weight:700;"
-            "letter-spacing:0.8px;text-transform:uppercase;"
-            "color:#7D7D7D;margin-bottom:5px'>"
-            "QUICK QUESTIONS</div>"
-            + "".join(
-                "<span style='display:inline-block;"
-                "background:white;"
-                "border:1.5px solid #D04A02;"
-                "color:#D04A02;border-radius:20px;"
-                "padding:3px 11px;font-size:0.77em;"
-                "font-weight:600;margin:2px 3px;"
-                "white-space:nowrap'>{}</span>".format(c)
-                for c in chips)
-            + "</div>")
-        chat_html += chip_html
-        chat_html += "</div>"   # close chat-outer
+        chat_html += "</div>"  # close chat-outer
         st.markdown(chat_html, unsafe_allow_html=True)
 
-        # Functional chip buttons — compact row
+        # Chips rendered as Streamlit buttons
+        # INSIDE the chat area visually via CSS
         st.markdown(
-            "<div style='font-size:0.71em;color:#7D7D7D;"
-            "font-weight:600;letter-spacing:0.6px;"
-            "margin:4px 0 2px'>CLICK TO ASK:</div>",
+            "<div style='background:#F8F8F8;"
+            "border:1px solid #E0E0E0;"
+            "border-top:none;"
+            "padding:10px 14px 8px;"
+            "margin-bottom:0'>"
+            "<div style='font-size:0.70em;font-weight:700;"
+            "letter-spacing:0.8px;text-transform:uppercase;"
+            "color:#7D7D7D;margin-bottom:6px'>"
+            "QUICK QUESTIONS</div>"
+            "</div>",
             unsafe_allow_html=True)
-        chip_cols = st.columns(3)
-        chip_map = [
-            ("Who quoted Cisco Catalyst?", 0),
-            ("Compare Palo Alto prices",   1),
-            ("Cheapest Cybersecurity?",    2),
-            ("TrendMicro profile",         0),
-            ("List all vendors",           1),
-            ("Catalog summary",            2),
+
+        chips = [
+            "Who quoted Cisco Catalyst?",
+            "Compare Palo Alto prices",
+            "Cheapest Cybersecurity vendor?",
+            "What does TrendMicro offer?",
+            "List all vendors",
+            "Catalog summary",
         ]
-        for chip_txt, col_idx in chip_map:
-            if chip_cols[col_idx].button(
+        # Row 1
+        ch_r1 = st.columns(3)
+        for i, chip_txt in enumerate(chips[:3]):
+            if ch_r1[i].button(
                     chip_txt,
                     key="chip_{}_{}".format(
                         chat_key, chip_txt[:20]),
@@ -1290,6 +1299,86 @@ def render_browse_verdict(df_master, df_exploded,
                     "bot_resp": resp,
                 })
                 st.rerun()
+        # Row 2
+        ch_r2 = st.columns(3)
+        for i, chip_txt in enumerate(chips[3:]):
+            if ch_r2[i].button(
+                    chip_txt,
+                    key="chip_{}_{}".format(
+                        chat_key, chip_txt[:20]),
+                    use_container_width=True):
+                resp = chatbot_response(
+                    chip_txt, df_master, df_exploded)
+                st.session_state[
+                    chat_history_key].append({
+                    "user":     chip_txt,
+                    "bot_text": resp["text"],
+                    "bot_resp": resp,
+                })
+                st.rerun()
+                        
+        chat_html += "</div>"  # close chat-outer
+        st.markdown(chat_html, unsafe_allow_html=True)
+
+        # Chips rendered as Streamlit buttons
+        # INSIDE the chat area visually via CSS
+        st.markdown(
+            "<div style='background:#F8F8F8;"
+            "border:1px solid #E0E0E0;"
+            "border-top:none;"
+            "padding:10px 14px 8px;"
+            "margin-bottom:0'>"
+            "<div style='font-size:0.70em;font-weight:700;"
+            "letter-spacing:0.8px;text-transform:uppercase;"
+            "color:#7D7D7D;margin-bottom:6px'>"
+            "QUICK QUESTIONS</div>"
+            "</div>",
+            unsafe_allow_html=True)
+
+        chips = [
+            "Who quoted Cisco Catalyst?",
+            "Compare Palo Alto prices",
+            "Cheapest Cybersecurity vendor?",
+            "What does TrendMicro offer?",
+            "List all vendors",
+            "Catalog summary",
+        ]
+        # Row 1
+        ch_r1 = st.columns(3)
+        for i, chip_txt in enumerate(chips[:3]):
+            if ch_r1[i].button(
+                    chip_txt,
+                    key="chip_{}_{}".format(
+                        chat_key, chip_txt[:20]),
+                    use_container_width=True):
+                resp = chatbot_response(
+                    chip_txt, df_master, df_exploded)
+                st.session_state[
+                    chat_history_key].append({
+                    "user":     chip_txt,
+                    "bot_text": resp["text"],
+                    "bot_resp": resp,
+                })
+                st.rerun()
+        # Row 2
+        ch_r2 = st.columns(3)
+        for i, chip_txt in enumerate(chips[3:]):
+            if ch_r2[i].button(
+                    chip_txt,
+                    key="chip_{}_{}".format(
+                        chat_key, chip_txt[:20]),
+                    use_container_width=True):
+                resp = chatbot_response(
+                    chip_txt, df_master, df_exploded)
+                st.session_state[
+                    chat_history_key].append({
+                    "user":     chip_txt,
+                    "bot_text": resp["text"],
+                    "bot_resp": resp,
+                })
+                st.rerun()
+                    
+
 
         # Show last chart
         if st.session_state[chat_history_key]:
