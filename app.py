@@ -542,13 +542,36 @@ def load_data():
 
     df = None
 
-    if os.path.exists(CSV_PATH):
+   if os.path.exists(XLS_PATH):
+        try:
+            raw = pd.read_excel(
+                XLS_PATH, engine="openpyxl",
+                header=None)
+            header_row = 0
+            for i, row in raw.iterrows():
+                vals = [
+                    str(v).strip().lower()
+                    for v in row.values if pd.notna(v)]
+                if (any("category" in v for v in vals)
+                        and any("vendor" in v
+                                for v in vals)):
+                    header_row = i; break
+            df = pd.read_excel(
+                XLS_PATH, engine="openpyxl",
+                header=header_row)
+            df.columns = [
+                str(c).strip() for c in df.columns]
+        except Exception as e:
+            st.warning("Excel load error: {}".format(e))
+
+    elif os.path.exists(CSV_PATH):
         try:
             df = pd.read_csv(CSV_PATH)
             df.columns = [
                 str(c).strip() for c in df.columns]
         except Exception as e:
             st.warning("CSV load error: {}".format(e))
+
 
     elif os.path.exists(XLS_PATH):
         try:
