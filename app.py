@@ -179,9 +179,6 @@ TOTAL_KW = [
     "amount due","net total","total cost",
     "total value","subtotal","total"]
 
-def _parse_num(s):
-    try:
-        return float(re.sub(r"[^\d.]
 
 def _parse_num(s):
     try:
