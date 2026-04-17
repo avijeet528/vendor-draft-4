@@ -30,7 +30,7 @@ st.set_page_config(
     page_title="IT Procurement Intelligence",
     page_icon="📋",
     layout="wide",
-    initial_sidebar_ebar="expanded",
+    initial_sidebar_state="expanded",
 )
 
 # ════════════════════════════════════════════════════════════
