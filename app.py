@@ -161,6 +161,184 @@ button[data-baseweb="tab"][aria-selected="true"]{
     margin-bottom:6px;border-left:6px solid #D04A02;
     font-size:0.85em;font-weight:700;
     letter-spacing:1px;text-transform:uppercase;}
+/* ── Floating Chat Button ── */
+.chat-fab {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 58px;
+    height: 58px;
+    background: #D04A02;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(208,74,2,0.45);
+    z-index: 9999;
+    transition: transform 0.2s ease,
+                box-shadow 0.2s ease;
+}
+.chat-fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 22px rgba(208,74,2,0.55);
+}
+.chat-fab-icon {
+    font-size: 1.6em;
+    color: white;
+    line-height: 1;
+}
+.chat-fab-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    background: #2D2D2D;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.65em;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.chat-panel {
+    position: fixed;
+    bottom: 100px;
+    right: 28px;
+    width: 370px;
+    max-height: 600px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+    z-index: 9998;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #E0E0E0;
+    animation: slideUp 0.25s ease;
+}
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0);    }
+}
+.chat-panel-header {
+    background: #2D2D2D;
+    color: white;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+.chat-panel-title {
+    font-weight: 700;
+    font-size: 0.92em;
+    font-family: Georgia, serif;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.chat-panel-close {
+    cursor: pointer;
+    font-size: 1.1em;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    background: none;
+    border: none;
+    color: white;
+    padding: 0 4px;
+}
+.chat-panel-close:hover { opacity: 1; }
+.chat-panel-msgs {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 14px 6px;
+    background: #F8F8F8;
+    min-height: 200px;
+    max-height: 340px;
+}
+.chat-panel-quick {
+    background: white;
+    border-top: 1px solid #F0F0F0;
+    padding: 8px 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.chat-panel-input {
+    background: white;
+    border-top: 1px solid #E0E0E0;
+    padding: 10px 12px;
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.float-msg-user {
+    background: #D04A02;
+    color: white;
+    border-radius: 14px 14px 3px 14px;
+    padding: 8px 12px;
+    margin: 4px 0 4px auto;
+    max-width: 82%;
+    font-size: 0.83em;
+    display: block;
+    float: right;
+    clear: both;
+    word-break: break-word;
+}
+.float-msg-bot {
+    background: white;
+    color: #2D2D2D;
+    border: 1px solid #E8E8E8;
+    border-left: 3px solid #D04A02;
+    border-radius: 14px 14px 14px 3px;
+    padding: 8px 12px;
+    margin: 4px 0;
+    max-width: 88%;
+    font-size: 0.83em;
+    display: block;
+    float: left;
+    clear: both;
+    word-break: break-word;
+}
+.float-chip {
+    display: inline-block;
+    background: #FFF5F0;
+    border: 1.5px solid #D04A02;
+    color: #D04A02;
+    border-radius: 16px;
+    padding: 3px 10px;
+    font-size: 0.72em;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+.float-chip:hover {
+    background: #D04A02;
+    color: white;
+}
+.chat-online-dot {
+    width: 8px;
+    height: 8px;
+    background: #4CAF50;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
+
+
+
+
+    
 </style>
 """, unsafe_allow_html=True)
 
